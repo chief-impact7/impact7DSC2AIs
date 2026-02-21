@@ -1,5 +1,5 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, getDocs, doc, setDoc, addDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, addDoc, deleteDoc, serverTimestamp, query, where, orderBy } from 'firebase/firestore';
 import { auth, db } from './firebase-config.js';
 import { signInWithGoogle, logout } from './auth.js';
 
@@ -61,15 +61,24 @@ const formatDate = (dateStr) => {
 // ---------------------------------------------------------------------------
 // Auth state
 // ---------------------------------------------------------------------------
-onAuthStateChanged(auth, (user) => {
-    currentUser = user;
+onAuthStateChanged(auth, async (user) => {
     const avatarBtn = document.querySelector('.avatar');
 
     if (user) {
+        // 도메인 체크: gw.impact7.kr 또는 impact7.kr만 허용
+        const email = user.email || '';
+        if (!email.endsWith('@gw.impact7.kr') && !email.endsWith('@impact7.kr')) {
+            alert('❌ 허용되지 않은 계정입니다.\n학원 계정(@gw.impact7.kr 또는 @impact7.kr)으로 다시 로그인해주세요.');
+            await logout();
+            return;
+        }
+
+        currentUser = user;
         avatarBtn.textContent = user.email[0].toUpperCase();
         avatarBtn.title = `Logged in as ${user.email} (click to logout)`;
         loadStudentList();
     } else {
+        currentUser = null;
         avatarBtn.textContent = 'G';
         avatarBtn.title = 'Login with Google';
         document.querySelector('.list-items').innerHTML =
@@ -134,6 +143,10 @@ function applyFilterAndRender() {
         filtered = filtered.filter(s => s.branch === activeFilter.value);
     } else if (activeFilter.type === 'day') {
         filtered = filtered.filter(s => normalizeDays(s.day).includes(activeFilter.value));
+    } else if (activeFilter.type === 'status') {
+        filtered = filtered.filter(s => s.status === activeFilter.value);
+    } else if (activeFilter.type === 'class_type') {
+        filtered = filtered.filter(s => (s.class_type || '정규') === activeFilter.value);
     }
 
     const term = document.getElementById('studentSearchInput')?.value.trim().toLowerCase() || '';
@@ -164,11 +177,14 @@ function renderStudentList(students) {
         const div = document.createElement('div');
         div.className = 'list-item';
         div.dataset.id = s.id;
+        const branch = s.branch || branchFromSymbol(s.level_symbol) || '';
+        const schoolShort = abbreviateSchool(s);
+        const subLine = [branch, schoolShort !== '—' ? schoolShort : ''].filter(Boolean).join(' · ');
         div.innerHTML = `
             <span class="material-symbols-outlined drag-icon">person</span>
             <div class="item-main">
                 <span class="item-title">${s.name || '—'}</span>
-                <span class="item-desc">${s.school || ''} &middot; ${s.level || ''} ${s.grade || ''}학년 &middot; ${s.branch || ''}</span>
+                <span class="item-desc">${subLine || '—'}</span>
             </div>
             <span class="item-tag">${classCode(s)}</span>
         `;
@@ -209,6 +225,14 @@ document.getElementById('studentSearchInput')?.addEventListener('input', applyFi
 window.selectStudent = (studentId, studentData, targetElement) => {
     currentStudentId = studentId;
 
+    // 폼이 열려 있으면 조회 모드로 초기화
+    isEditMode = false;
+    document.getElementById('form-header').style.display = 'none';
+    document.getElementById('detail-form').style.display = 'none';
+    document.getElementById('detail-header').style.display = 'flex';
+    document.getElementById('detail-tab-bar').style.display = 'flex';
+    switchDetailTab('info');
+
     document.getElementById('profile-initial').textContent = studentData.name?.[0] || 'S';
     document.getElementById('profile-name').textContent = studentData.name || studentId;
     const branch = studentData.branch || branchFromSymbol(studentData.level_symbol) || '';
@@ -218,23 +242,30 @@ window.selectStudent = (studentId, studentData, targetElement) => {
         : branch || schoolShort;
     document.getElementById('profile-status').textContent = studentData.status || '—';
 
-    document.getElementById('profile-student-phone').textContent = studentData.student_phone || 'N/A';
-    document.getElementById('profile-parent-phone-1').textContent = studentData.parent_phone_1 || 'N/A';
-    document.getElementById('profile-parent-phone-2').textContent = studentData.parent_phone_2 || 'N/A';
+    // 기본 정보 카드
+    document.getElementById('detail-level-name').textContent = studentData.level || '—';
+    document.getElementById('detail-school-name').textContent = studentData.school || '—';
+    document.getElementById('detail-grade').textContent = studentData.grade ? `${studentData.grade}학년` : '—';
 
-    // 반기호 = 학부기호 + 레벨기호 (예: HA101)
-    document.getElementById('profile-level').textContent = classCode(studentData) || 'N/A';
-    document.getElementById('profile-branch').textContent = studentData.branch || branchFromSymbol(studentData.level_symbol) || 'N/A';
+    // 연락처 카드
+    document.getElementById('profile-student-phone').textContent = studentData.student_phone || '—';
+    document.getElementById('profile-parent-phone-1').textContent = studentData.parent_phone_1 || '—';
+    document.getElementById('profile-parent-phone-2').textContent = studentData.parent_phone_2 || '—';
+
+    // 학습·등록 정보 카드
+    document.getElementById('profile-level').textContent = classCode(studentData) || '—';
+    document.getElementById('profile-branch').textContent = studentData.branch || branchFromSymbol(studentData.level_symbol) || '—';
     document.getElementById('profile-day').textContent = displayDays(studentData.day);
-
     document.getElementById('profile-class-type').textContent = studentData.class_type || '정규';
+    document.getElementById('detail-status').textContent = studentData.status || '—';
+
     const specRow = document.getElementById('profile-special-class-row');
     if (specRow) {
         if (studentData.class_type === '특강') {
             const sStart = studentData.special_start_date || '?';
             const sEnd = studentData.special_end_date || '?';
             document.getElementById('profile-special-period').textContent = `${formatDate(sStart)} ~ ${formatDate(sEnd)}`;
-            specRow.style.display = 'flex';
+            specRow.style.display = 'block';
         } else {
             specRow.style.display = 'none';
         }
@@ -242,7 +273,7 @@ window.selectStudent = (studentId, studentData, targetElement) => {
 
     document.getElementById('profile-start-date').textContent = formatDate(studentData.start_date);
     const startDateRow = document.getElementById('profile-start-date-row');
-    if (startDateRow) startDateRow.style.display = (studentData.class_type === '특강') ? 'none' : 'flex';
+    if (startDateRow) startDateRow.style.display = (studentData.class_type === '특강') ? 'none' : 'block';
 
     const pauseRow = document.getElementById('profile-pause-row');
     if (pauseRow) {
@@ -250,7 +281,7 @@ window.selectStudent = (studentId, studentData, targetElement) => {
             const pStart = studentData.pause_start_date || '?';
             const pEnd = studentData.pause_end_date || '?';
             document.getElementById('profile-pause-period').textContent = `${formatDate(pStart)} ~ ${formatDate(pEnd)}`;
-            pauseRow.style.display = 'flex';
+            pauseRow.style.display = 'block';
         } else {
             pauseRow.style.display = 'none';
         }
@@ -280,11 +311,15 @@ window.showNewStudentForm = () => {
     document.querySelectorAll('.list-item').forEach(el => el.classList.remove('active'));
     document.getElementById('detail-header').style.display = 'none';
     document.getElementById('form-header').style.display = 'flex';
+    document.getElementById('detail-tab-bar').style.display = 'none';
     document.getElementById('form-title').textContent = '신규 등록';
     document.getElementById('detail-view').style.display = 'none';
+    document.getElementById('history-view').style.display = 'none';
     document.getElementById('detail-form').style.display = 'block';
     document.getElementById('new-student-form').reset();
     document.getElementById('opt-withdraw').style.display = 'none';
+    document.getElementById('form-memo-list').innerHTML =
+        '<p style="color:var(--text-sec);font-size:0.85em;">저장 후 메모를 추가할 수 있습니다.</p>';
 
     // 오늘 날짜를 기본값으로
     const today = new Date().toISOString().slice(0, 10);
@@ -322,8 +357,10 @@ window.showEditForm = () => {
     isEditMode = true;
     document.getElementById('detail-header').style.display = 'none';
     document.getElementById('form-header').style.display = 'flex';
+    document.getElementById('detail-tab-bar').style.display = 'none';
     document.getElementById('form-title').textContent = '정보 수정';
     document.getElementById('detail-view').style.display = 'none';
+    document.getElementById('history-view').style.display = 'none';
     document.getElementById('detail-form').style.display = 'block';
     document.getElementById('opt-withdraw').style.display = 'block';
 
@@ -357,14 +394,17 @@ window.showEditForm = () => {
     f.querySelectorAll('[name="day"]').forEach(cb => {
         cb.checked = days.includes(cb.value);
     });
+
+    loadFormMemos(currentStudentId);
 };
 
 window.hideForm = () => {
     isEditMode = false;
     document.getElementById('form-header').style.display = 'none';
     document.getElementById('detail-header').style.display = 'flex';
+    document.getElementById('detail-tab-bar').style.display = 'flex';
     document.getElementById('detail-form').style.display = 'none';
-    document.getElementById('detail-view').style.display = 'block';
+    switchDetailTab('info');
 };
 
 // ---------------------------------------------------------------------------
@@ -593,3 +633,157 @@ window.addMemo = async () => {
         alert('메모 저장 실패: ' + e.message);
     }
 };
+
+// ---------------------------------------------------------------------------
+// 폼 메모 관리 (수정 폼 전용, #form-memo-list)
+// ---------------------------------------------------------------------------
+async function loadFormMemos(studentId) {
+    const container = document.getElementById('form-memo-list');
+    if (!container) return;
+    container.innerHTML = '<p style="color:var(--text-sec);font-size:0.85em;">로딩 중...</p>';
+
+    try {
+        const snap = await getDocs(collection(db, 'students', studentId, 'memos'));
+        const memos = [];
+        snap.forEach(d => memos.push({ id: d.id, ...d.data() }));
+        memos.sort((a, b) => (a.created_at?.seconds || 0) - (b.created_at?.seconds || 0));
+
+        container.innerHTML = '';
+        if (memos.length === 0) {
+            container.innerHTML = '<p style="color:var(--text-sec);font-size:0.85em;">메모가 없습니다. + 버튼으로 추가하세요.</p>';
+            return;
+        }
+        memos.forEach(memo => {
+            const ts = memo.created_at?.toDate?.();
+            const dateStr = ts ? ts.toLocaleDateString('ko-KR') : '';
+            const author = memo.author ? memo.author.replace(/@.*/, '') : '';
+
+            const row = document.createElement('div');
+            row.className = 'memo-form-item';
+            row.innerHTML = `
+                <div class="memo-form-meta">
+                    <span>${dateStr}${author ? ' · ' + author : ''}</span>
+                    <button class="memo-delete-btn" onclick="window.deleteFormMemo('${studentId}','${memo.id}')" title="삭제">
+                        <span class="material-symbols-outlined" style="font-size:15px;">close</span>
+                    </button>
+                </div>
+                <div class="memo-form-text">${(memo.text || '').replace(/\n/g, '<br>')}</div>
+            `;
+            container.appendChild(row);
+        });
+    } catch (e) {
+        container.innerHTML = '<p style="color:red;font-size:0.85em;">메모 로드 실패</p>';
+    }
+}
+
+window.addFormMemo = async () => {
+    if (!currentStudentId) return;
+    const text = prompt('메모 내용을 입력하세요:');
+    if (!text || !text.trim()) return;
+    try {
+        await addDoc(collection(db, 'students', currentStudentId, 'memos'), {
+            text: text.trim(),
+            created_at: serverTimestamp(),
+            author: currentUser?.email || 'system',
+        });
+        await loadFormMemos(currentStudentId);
+    } catch (e) {
+        alert('메모 저장 실패: ' + e.message);
+    }
+};
+
+window.deleteFormMemo = async (studentId, memoId) => {
+    if (!confirm('이 메모를 삭제하시겠습니까?')) return;
+    try {
+        await deleteDoc(doc(db, 'students', studentId, 'memos', memoId));
+        await loadFormMemos(studentId);
+    } catch (e) {
+        alert('삭제 실패: ' + e.message);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// 탭 전환
+// ---------------------------------------------------------------------------
+function switchDetailTab(tab) {
+    const infoView = document.getElementById('detail-view');
+    const histView = document.getElementById('history-view');
+    const tabBtns = document.querySelectorAll('.tab-btn');
+
+    tabBtns.forEach(b => b.classList.remove('active'));
+
+    if (tab === 'history') {
+        infoView.style.display = 'none';
+        histView.style.display = 'block';
+        tabBtns[1]?.classList.add('active');
+        if (currentStudentId) loadHistory(currentStudentId);
+    } else {
+        infoView.style.display = 'block';
+        histView.style.display = 'none';
+        tabBtns[0]?.classList.add('active');
+    }
+}
+window.switchDetailTab = switchDetailTab;
+
+// ---------------------------------------------------------------------------
+// 수업 이력 (history_logs)
+// ---------------------------------------------------------------------------
+async function loadHistory(studentId) {
+    const container = document.getElementById('history-list');
+    if (!container) return;
+    container.innerHTML = '<p style="color:var(--text-sec);font-size:0.9em;">로딩 중...</p>';
+
+    try {
+        const q = query(
+            collection(db, 'history_logs'),
+            where('doc_id', '==', studentId),
+            orderBy('timestamp', 'desc')
+        );
+        const snap = await getDocs(q);
+        const logs = [];
+        snap.forEach(d => logs.push({ id: d.id, ...d.data() }));
+        renderHistory(logs);
+    } catch (e) {
+        console.error('[HISTORY ERROR]', e);
+        container.innerHTML = `<p style="color:red;font-size:0.9em;">이력 로드 실패: ${e.message}</p>`;
+    }
+}
+
+function renderHistory(logs) {
+    const container = document.getElementById('history-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (logs.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-sec);font-size:0.9em;padding:8px 0;">수업 이력이 없습니다.</p>';
+        return;
+    }
+
+    const typeLabels = { ENROLL: '등록', UPDATE: '수정', WITHDRAW: '퇴원' };
+    const typeClasses = { ENROLL: 'badge-enroll', UPDATE: 'badge-update', WITHDRAW: 'badge-withdraw' };
+
+    logs.forEach(log => {
+        const ts = log.timestamp?.toDate ? log.timestamp.toDate() : null;
+        const dateStr = ts
+            ? ts.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+            : '—';
+
+        const label = typeLabels[log.change_type] || log.change_type;
+        const cls = typeClasses[log.change_type] || '';
+
+        const hasBefore = log.before && log.before !== '—';
+
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        item.innerHTML = `
+            <div class="history-item-header">
+                <span class="history-badge ${cls}">${label}</span>
+                <span class="history-date">${dateStr}</span>
+                <span class="history-author">${log.google_login_id || ''}</span>
+            </div>
+            ${hasBefore ? `<div class="history-row history-before"><span class="history-field-label">이전</span><span>${log.before}</span></div>` : ''}
+            <div class="history-row history-after"><span class="history-field-label">내용</span><span>${log.after || '—'}</span></div>
+        `;
+        container.appendChild(item);
+    });
+}

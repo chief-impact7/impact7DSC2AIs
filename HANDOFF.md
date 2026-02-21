@@ -221,6 +221,7 @@ await addDoc(collection(db, 'history_logs'), {
 - [x] 일요일 포함 월~일 요일 선택
 - [x] 학교+학부+학년 축약 표시 (`진명여고2`)
 - [x] 소속 자동 파생 (레벨기호 첫 자리 기반)
+- [x] 다중 도메인 로그인 지원 (`gw.impact7.kr` 및 `impact7.kr`)
 - [x] 날짜 포맷 통일 (YYYY-MM-DD)
 - [x] 메모 카드 (추가, 접기/펼치기, 삭제, Firestore 서브컬렉션)
 

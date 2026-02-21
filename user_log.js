@@ -242,3 +242,32 @@ Keep the design minimalist and professional, following Google Material 3.
 5. Firestore import에 deleteDoc 추가.
 -----------------------------------------
 */
+/*
+-----------------------------------------
+[Log #21] [2026-02-22 03:15:00]
+
+사용자: 계속 (정리 및 GitHub 업로드 완료 요청)
+
+작업:
+1. HANDOFF.md를 오늘 날짜(02-22) 기준으로 최신화: 소속 자동 파생, 수업종류별 동적 필드, 메모 관리, 일요일 지원 등 새로 추가된 모든 아키텍처와 함수 명세를 상세히 기록.
+2. PATCH_NOTES.js를 최신 사항으로 정리하여 맨 위에 추가 및 구문 오류 픽스.
+3. 프로젝트 내 주요 파일(app.js, index.html, style.css 등)을 Git master 브랜치에 커밋.
+4. GitHub 원격 저장소를 https://github.com/chief-impact7/impact7DB.git 로 설정.
+5. GitHub 푸시 시도 (인증 필요 시 사용자에게 안내 준비).
+
+현재 상태: 로컬 커밋은 완료되었으며, GitHub 푸시는 HTTPS 인증 절차로 인해 사용자의 직접적인 push 또는 토큰 기반 인증이 필요한 상태임.
+-----------------------------------------
+*/
+/*
+-----------------------------------------
+[Log #23] [2026-02-22 04:36:15]
+
+사용자: 도메인 추가 요청 (gw.impact7.kr + impact7.kr)
+
+작업:
+1. auth.js: GoogleAuthProvider의 hd 파라미터 힌트 제거로 다중 도메인 선택 지원.
+2. firestore.rules: isAuthorized() 규칙에 @impact7.kr 도메인 추가 허용 로직 반영.
+3. app.js: onAuthStateChanged 모듈에 프론트엔드 도메인 유효성 검사 로직 추가.
+4. 사용자에게 보안 규칙 배포(firebase deploy) 명령어 안내.
+-----------------------------------------
+*/
