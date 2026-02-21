@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Academy Flow Dashboard</title>
+    <title>AIM Dashboard</title>
     <link
         href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@400;500&display=swap"
         rel="stylesheet">
@@ -19,13 +19,13 @@
             <span class="material-symbols-outlined icon-btn">menu</span>
             <div class="logo">
                 <span class="material-symbols-outlined text-primary" style="font-size:32px;">school</span>
-                <span class="title">Academy Flow Dashboard</span>
+                <span class="title">AIM Dashboard</span>
             </div>
         </div>
         <div class="app-bar-right">
             <div class="search-box">
                 <span class="material-symbols-outlined search-icon">search</span>
-                <input type="text" placeholder="Search students, tasks..." />
+                <input type="text" id="studentSearchInput" placeholder="Search by name, school, or phone..." />
             </div>
             <span class="material-symbols-outlined icon-btn">help</span>
             <span class="material-symbols-outlined icon-btn">settings</span>
@@ -37,30 +37,70 @@
     <div class="container">
         <!-- Sidebar -->
         <nav class="sidebar">
-            <button class="compose-btn">
+            <button class="compose-btn" onclick="showNewStudentForm()">
                 <span class="material-symbols-outlined">add</span>
-                New Student
+                신규 등록
             </button>
+
+            <div class="sidebar-label">Students</div>
             <ul class="nav-list">
-                <li class="nav-item active">
-                    <span class="material-symbols-outlined">inbox</span>
+                <li class="nav-item active" data-filter-type="all">
+                    <span class="material-symbols-outlined">people</span>
                     <span>All Students</span>
-                </li>
-                <li class="nav-item">
-                    <span class="material-symbols-outlined">schedule</span>
-                    <span>Today's Schedule</span>
-                </li>
-                <li class="nav-item">
-                    <span class="material-symbols-outlined">task_alt</span>
-                    <span>Completed</span>
                 </li>
             </ul>
 
-            <div class="sidebar-label">Labels</div>
+            <div class="sidebar-label">School Level</div>
             <ul class="nav-list">
-                <li class="nav-item"><span class="label-color c-blue"></span>Elementary</li>
-                <li class="nav-item"><span class="label-color c-red"></span>Middle School</li>
-                <li class="nav-item"><span class="label-color c-green"></span>High School</li>
+                <li class="nav-item" data-filter-type="level" data-filter-value="초등">
+                    <span class="label-color c-green"></span>
+                    <span>Elementary (초등)</span>
+                </li>
+                <li class="nav-item" data-filter-type="level" data-filter-value="중등">
+                    <span class="label-color c-blue"></span>
+                    <span>Middle School (중등)</span>
+                </li>
+                <li class="nav-item" data-filter-type="level" data-filter-value="고등">
+                    <span class="label-color c-red"></span>
+                    <span>High School (고등)</span>
+                </li>
+            </ul>
+
+            <div class="sidebar-label">단지</div>
+            <ul class="nav-list">
+                <li class="nav-item" data-filter-type="branch" data-filter-value="2단지">
+                    <span class="material-symbols-outlined">apartment</span>
+                    <span>2단지</span>
+                </li>
+                <li class="nav-item" data-filter-type="branch" data-filter-value="10단지">
+                    <span class="material-symbols-outlined">apartment</span>
+                    <span>10단지</span>
+                </li>
+            </ul>
+
+            <div class="sidebar-label">수업 요일</div>
+            <ul class="nav-list">
+                <li class="nav-item" data-filter-type="day" data-filter-value="월">
+                    <span class="day-dot">월</span><span>월요일</span>
+                </li>
+                <li class="nav-item" data-filter-type="day" data-filter-value="화">
+                    <span class="day-dot">화</span><span>화요일</span>
+                </li>
+                <li class="nav-item" data-filter-type="day" data-filter-value="수">
+                    <span class="day-dot">수</span><span>수요일</span>
+                </li>
+                <li class="nav-item" data-filter-type="day" data-filter-value="목">
+                    <span class="day-dot">목</span><span>목요일</span>
+                </li>
+                <li class="nav-item" data-filter-type="day" data-filter-value="금">
+                    <span class="day-dot">금</span><span>금요일</span>
+                </li>
+                <li class="nav-item" data-filter-type="day" data-filter-value="토">
+                    <span class="day-dot">토</span><span>토요일</span>
+                </li>
+                <li class="nav-item" data-filter-type="day" data-filter-value="일">
+                    <span class="day-dot">일</span><span>일요일</span>
+                </li>
             </ul>
         </nav>
 
@@ -69,91 +109,274 @@
             <!-- Student List -->
             <div class="list-panel">
                 <div class="panel-header">
-                    <span class="material-symbols-outlined icon-btn">check_box_outline_blank</span>
-                    <span class="material-symbols-outlined icon-btn">refresh</span>
-                    <span class="material-symbols-outlined icon-btn">more_vert</span>
+                    <span id="student-count" class="count-chip">—</span>
+                    <div class="actions">
+                        <span class="material-symbols-outlined icon-btn" title="Refresh"
+                            onclick="window.refreshStudents && window.refreshStudents()">refresh</span>
+                        <span class="material-symbols-outlined icon-btn">more_vert</span>
+                    </div>
                 </div>
                 <div class="list-items">
-                    <!-- Mock Item -->
-                    <div class="list-item" onclick="selectStudent('Student A')">
-                        <span class="material-symbols-outlined icon-btn drag-icon">drag_indicator</span>
-                        <div class="item-main">
-                            <span class="item-title">Student A</span>
-                            <span class="item-desc">- Grade 3 (Elementary) - Checked In (14:00)</span>
-                        </div>
-                        <span class="item-time">14:00 PM</span>
-                    </div>
-                    <div class="list-item" onclick="selectStudent('Student B')">
-                        <span class="material-symbols-outlined icon-btn drag-icon">drag_indicator</span>
-                        <div class="item-main">
-                            <span class="item-title">Student B</span>
-                            <span class="item-desc">- Grade 5 (Elementary) - Absent</span>
-                        </div>
-                        <span class="item-time">Yesterday</span>
-                    </div>
-                    <div class="list-item" onclick="selectStudent('Student C')">
-                        <span class="material-symbols-outlined icon-btn drag-icon">drag_indicator</span>
-                        <div class="item-main">
-                            <span class="item-title">Student C</span>
-                            <span class="item-desc">- Grade 1 (Middle) - Checked In (16:30)</span>
-                        </div>
-                        <span class="item-time">16:30 PM</span>
-                    </div>
+                    <p style="padding:16px;color:var(--text-sec)">Please log in to view students.</p>
                 </div>
             </div>
 
             <!-- Detail Panel -->
             <div class="detail-panel">
-                <div class="panel-header">
+                <!-- 조회 모드 헤더 -->
+                <div class="panel-header" id="detail-header">
                     <span class="material-symbols-outlined icon-btn" style="visibility:hidden">arrow_back</span>
                     <div class="actions">
-                        <span class="material-symbols-outlined icon-btn">print</span>
-                        <span class="material-symbols-outlined icon-btn">open_in_new</span>
+                        <span class="material-symbols-outlined icon-btn" title="Edit"
+                            onclick="showEditForm()">edit</span>
+                        <span class="material-symbols-outlined icon-btn" title="Print">print</span>
                     </div>
                 </div>
-                <div class="detail-content">
-                    <div class="detail-title-row">
-                        <h2 class="detail-title">Student A</h2>
-                        <span class="tag">Elementary</span>
+                <!-- 등록 폼 헤더 -->
+                <div class="panel-header" id="form-header" style="display:none">
+                    <span class="form-header-title" id="form-title">신규 등록</span>
+                    <div class="actions">
+                        <button class="btn-cancel" onclick="hideForm()">취소</button>
+                        <button class="btn-save" id="save-btn" onclick="submitNewStudent()">저장</button>
                     </div>
+                </div>
 
-                    <div class="section">
-                        <h3>Daily Flow Check</h3>
-                        <div class="form-row">
-                            <div class="input-group">
-                                <label>Check-in Time</label>
-                                <input type="time" id="checkinTime" class="md-input">
-                            </div>
-                            <div class="input-group">
-                                <label>Check-out Time</label>
-                                <input type="time" id="checkoutTime" class="md-input">
+                <!-- 조회 모드 -->
+                <div class="detail-content" id="detail-view">
+                    <div class="profile-header">
+                        <div class="profile-avatar">
+                            <span id="profile-initial">S</span>
+                        </div>
+                        <div>
+                            <h2 class="detail-title" id="profile-name">학생을 선택하세요</h2>
+                            <div class="profile-tags">
+                                <span class="tag" id="profile-school">—</span>
+                                <span class="tag tag-status" id="profile-status">—</span>
                             </div>
                         </div>
                     </div>
-
-                    <div class="section">
-                        <h3>Daily Routine Tasks</h3>
-                        <div class="checklist">
-                            <label class="check-item">
-                                <input type="checkbox" checked>
-                                <span>Vocabulary Test</span>
-                            </label>
-                            <label class="check-item">
-                                <input type="checkbox">
-                                <span>Math Review</span>
-                            </label>
-                            <label class="check-item">
-                                <input type="checkbox">
-                                <span>Reading Comprehension</span>
-                            </label>
-                            <label class="check-item">
-                                <input type="checkbox">
-                                <span>Homework Submission</span>
-                            </label>
+                    <div class="info-grid">
+                        <div class="info-card">
+                            <h3 class="info-card-title">
+                                <span class="material-symbols-outlined">contact_phone</span>
+                                연락처
+                            </h3>
+                            <div class="info-rows">
+                                <div class="info-row">
+                                    <div class="info-label">학생 연락처</div>
+                                    <div class="info-value" id="profile-student-phone">—</div>
+                                </div>
+                                <div class="info-row">
+                                    <div class="info-label">학부모 연락처 1</div>
+                                    <div class="info-value" id="profile-parent-phone-1">—</div>
+                                </div>
+                                <div class="info-row">
+                                    <div class="info-label">학부모 연락처 2</div>
+                                    <div class="info-value" id="profile-parent-phone-2">—</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="info-card memo-info-card">
+                            <h3 class="info-card-title">
+                                <span class="material-symbols-outlined">sticky_note_2</span>
+                                메모
+                                <button class="memo-add-btn" onclick="window.addMemo()" title="메모 추가">
+                                    <span class="material-symbols-outlined">add</span>
+                                </button>
+                            </h3>
+                            <div id="memo-list" class="memo-list">
+                                <p style="color:var(--text-sec);font-size:0.85em;">학생을 선택하면 메모가 표시됩니다.</p>
+                            </div>
+                        </div>
+                        <div class="info-card">
+                            <h3 class="info-card-title">
+                                <span class="material-symbols-outlined">school</span>
+                                학습 정보
+                            </h3>
+                            <div class="info-rows">
+                                <div class="info-row">
+                                    <div class="info-label">반</div>
+                                    <div class="info-value" id="profile-level">—</div>
+                                </div>
+                                <div class="info-row">
+                                    <div class="info-label">소속</div>
+                                    <div class="info-value" id="profile-branch">—</div>
+                                </div>
+                                <div class="info-row">
+                                    <div class="info-label">요일</div>
+                                    <div class="info-value" id="profile-day">—</div>
+                                </div>
+                                <div class="info-row">
+                                    <div class="info-label">수업종류</div>
+                                    <div class="info-value" id="profile-class-type">—</div>
+                                </div>
+                                <div class="info-row" id="profile-special-class-row" style="display:none;">
+                                    <div class="info-label">특강 기간</div>
+                                    <div class="info-value" id="profile-special-period">—</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="info-card">
+                            <h3 class="info-card-title">
+                                <span class="material-symbols-outlined">event_note</span>
+                                등록 정보
+                            </h3>
+                            <div class="info-rows">
+                                <div class="info-row" id="profile-start-date-row">
+                                    <div class="info-label">등원일</div>
+                                    <div class="info-value" id="profile-start-date">—</div>
+                                </div>
+                                <div class="info-row" id="profile-pause-row" style="display:none;">
+                                    <div class="info-label">휴원 기간</div>
+                                    <div class="info-value" id="profile-pause-period">—</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
+                </div>
 
-                    <button class="btn-primary" onclick="saveDailyFlow()">Save Changes</button>
+                <!-- 등록 폼 -->
+                <div class="detail-content" id="detail-form" style="display:none">
+                    <form id="new-student-form" onsubmit="return false">
+                        <div class="form-grid">
+                            <!-- 기본 정보 -->
+                            <div class="form-card">
+                                <h3 class="info-card-title">
+                                    <span class="material-symbols-outlined">person</span>
+                                    기본 정보
+                                </h3>
+                                <div class="form-fields">
+                                    <div class="form-field">
+                                        <label class="field-label">이름 *</label>
+                                        <input class="field-input" name="name" type="text" placeholder="홍길동" required>
+                                    </div>
+                                    <div class="form-field">
+                                        <label class="field-label">학부</label>
+                                        <select class="field-select" name="level">
+                                            <option value="초등">초등</option>
+                                            <option value="중등">중등</option>
+                                            <option value="고등">고등</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-field">
+                                        <label class="field-label">학교</label>
+                                        <input class="field-input" name="school" type="text" placeholder="○○초등학교">
+                                    </div>
+                                    <div class="form-field">
+                                        <label class="field-label">학년</label>
+                                        <input class="field-input" name="grade" type="text" placeholder="3">
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- 연락처 -->
+                            <div class="form-card">
+                                <h3 class="info-card-title">
+                                    <span class="material-symbols-outlined">contact_phone</span>
+                                    연락처
+                                </h3>
+                                <div class="form-fields">
+                                    <div class="form-field">
+                                        <label class="field-label">학생 연락처</label>
+                                        <input class="field-input" name="student_phone" type="tel"
+                                            placeholder="010-0000-0000">
+                                    </div>
+                                    <div class="form-field">
+                                        <label class="field-label">학부모 연락처 1 *</label>
+                                        <input class="field-input" name="parent_phone_1" type="tel"
+                                            placeholder="010-0000-0000" required>
+                                    </div>
+                                    <div class="form-field">
+                                        <label class="field-label">학부모 연락처 2</label>
+                                        <input class="field-input" name="parent_phone_2" type="tel"
+                                            placeholder="010-0000-0000">
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- 학습/등록 정보 -->
+                            <div class="form-card">
+                                <h3 class="info-card-title">
+                                    <span class="material-symbols-outlined">school</span>
+                                    학습 · 등록 정보
+                                </h3>
+                                <div class="form-fields">
+                                    <div class="form-field">
+                                        <label class="field-label">학부기호</label>
+                                        <input class="field-input" name="level_code" type="text" placeholder="HX">
+                                    </div>
+                                    <div class="form-field">
+                                        <label class="field-label">레벨기호 <span id="branch-preview"
+                                                style="color: var(--primary, #1a73e8); font-size: 0.85em; font-weight: 600;"></span></label>
+                                        <input class="field-input" name="level_symbol" type="text"
+                                            placeholder="102 → 2단지, 201 → 10단지"
+                                            oninput="window.handleLevelSymbolChange && window.handleLevelSymbolChange(this.value)">
+                                    </div>
+                                    <div class="form-field">
+                                        <label class="field-label">요일</label>
+                                        <div class="day-checkboxes">
+                                            <label class="day-check"><input type="checkbox" name="day"
+                                                    value="월">월</label>
+                                            <label class="day-check"><input type="checkbox" name="day"
+                                                    value="화">화</label>
+                                            <label class="day-check"><input type="checkbox" name="day"
+                                                    value="수">수</label>
+                                            <label class="day-check"><input type="checkbox" name="day"
+                                                    value="목">목</label>
+                                            <label class="day-check"><input type="checkbox" name="day"
+                                                    value="금">금</label>
+                                            <label class="day-check"><input type="checkbox" name="day"
+                                                    value="토">토</label>
+                                            <label class="day-check"><input type="checkbox" name="day"
+                                                    value="일">일</label>
+                                        </div>
+                                    </div>
+                                    <div class="form-field">
+                                        <label class="field-label">수업종류</label>
+                                        <select class="field-select" name="class_type"
+                                            onchange="window.handleClassTypeChange && window.handleClassTypeChange(this.value)">
+                                            <option value="정규" selected>정규</option>
+                                            <option value="특강">특강</option>
+                                            <option value="내신">내신</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-field" id="special-period-container" style="display:none;">
+                                        <label class="field-label">특강 기간</label>
+                                        <div style="display: flex; gap: 8px;">
+                                            <input class="field-input" name="special_start_date" type="date">
+                                            <span style="align-self: flex-end; padding-bottom: 8px;">~</span>
+                                            <input class="field-input" name="special_end_date" type="date">
+                                        </div>
+                                    </div>
+                                    <div class="form-field" id="start-date-container">
+                                        <label class="field-label">등원일</label>
+                                        <input class="field-input" name="start_date" type="date">
+                                    </div>
+                                    <div class="form-field">
+                                        <label class="field-label">상태</label>
+                                        <select class="field-select" name="status" id="status-select"
+                                            onchange="window.handleStatusChange && window.handleStatusChange(this.value)">
+                                            <option value="등원예정">등원예정</option>
+                                            <option value="재원" selected>재원</option>
+                                            <option value="실휴원" id="opt-pause-real">실휴원</option>
+                                            <option value="가휴원" id="opt-pause-virtual">가휴원</option>
+                                            <option value="퇴원" id="opt-withdraw" style="display:none;">퇴원</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-field" id="pause-period-container" style="display:none;">
+                                        <label class="field-label">휴원 기간</label>
+                                        <div style="display: flex; gap: 8px;">
+                                            <input class="field-input" name="pause_start_date" type="date"
+                                                title="휴원 시작일"
+                                                onchange="window.checkDurationLimit && window.checkDurationLimit()">
+                                            <span style="align-self: flex-end; padding-bottom: 8px;">~</span>
+                                            <input class="field-input" name="pause_end_date" type="date"
+                                                title="휴원 종료일 (예정)"
+                                                onchange="window.checkDurationLimit && window.checkDurationLimit()">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
                 </div>
             </div>
         </main>
