@@ -1,102 +1,164 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Academy Flow Dashboard</title>
-    <!-- Google Fonts: Roboto -->
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
-    <!-- Google Material Symbols -->
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-    <!-- Top App Bar -->
-    <header class="top-app-bar">
-        <div class="title">Academy Flow Dashboard</div>
-        <button class="md3-btn md3-btn-tonal" id="loginBtn">
-            <span class="material-symbols-outlined">account_circle</span>
-            Login with Google
-        </button>
+    <header class="app-bar">
+        <div class="app-bar-left">
+            <span class="material-symbols-outlined icon-btn">menu</span>
+            <div class="logo">
+                <span class="material-symbols-outlined text-primary" style="font-size:32px;">school</span>
+                <span class="title">Academy Flow Dashboard</span>
+            </div>
+        </div>
+        <div class="app-bar-right">
+            <div class="search-box">
+                <span class="material-symbols-outlined search-icon">search</span>
+                <input type="text" placeholder="Search students, tasks..." />
+            </div>
+            <span class="material-symbols-outlined icon-btn">help</span>
+            <span class="material-symbols-outlined icon-btn">settings</span>
+            <span class="material-symbols-outlined icon-btn">apps</span>
+            <div class="avatar icon-btn" onclick="handleLogin()">G</div>
+        </div>
     </header>
 
-    <div class="layout-container">
-        <!-- Left Panel (Sidebar) -->
-        <aside class="sidebar">
-            <div class="search-container">
-                <span class="material-symbols-outlined search-icon">search</span>
-                <input type="text" id="searchInput" class="search-input" placeholder="학생 검색...">
-            </div>
-            <div class="student-list" id="studentList">
-                <!-- Mock Student Cards -->
-                <div class="student-card active">
-                    <div class="avatar"><span class="material-symbols-outlined">person</span></div>
-                    <div class="info">
-                        <div class="name">Student A</div>
-                        <div class="grade">Grade 3</div>
+    <div class="container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <button class="compose-btn">
+                <span class="material-symbols-outlined">add</span>
+                New Student
+            </button>
+            <ul class="nav-list">
+                <li class="nav-item active">
+                    <span class="material-symbols-outlined">inbox</span>
+                    <span>All Students</span>
+                </li>
+                <li class="nav-item">
+                    <span class="material-symbols-outlined">schedule</span>
+                    <span>Today's Schedule</span>
+                </li>
+                <li class="nav-item">
+                    <span class="material-symbols-outlined">task_alt</span>
+                    <span>Completed</span>
+                </li>
+            </ul>
+
+            <div class="sidebar-label">Labels</div>
+            <ul class="nav-list">
+                <li class="nav-item"><span class="label-color c-blue"></span>Elementary</li>
+                <li class="nav-item"><span class="label-color c-red"></span>Middle School</li>
+                <li class="nav-item"><span class="label-color c-green"></span>High School</li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Student List -->
+            <div class="list-panel">
+                <div class="panel-header">
+                    <span class="material-symbols-outlined icon-btn">check_box_outline_blank</span>
+                    <span class="material-symbols-outlined icon-btn">refresh</span>
+                    <span class="material-symbols-outlined icon-btn">more_vert</span>
+                </div>
+                <div class="list-items">
+                    <!-- Mock Item -->
+                    <div class="list-item" onclick="selectStudent('Student A')">
+                        <span class="material-symbols-outlined icon-btn drag-icon">drag_indicator</span>
+                        <div class="item-main">
+                            <span class="item-title">Student A</span>
+                            <span class="item-desc">- Grade 3 (Elementary) - Checked In (14:00)</span>
+                        </div>
+                        <span class="item-time">14:00 PM</span>
+                    </div>
+                    <div class="list-item" onclick="selectStudent('Student B')">
+                        <span class="material-symbols-outlined icon-btn drag-icon">drag_indicator</span>
+                        <div class="item-main">
+                            <span class="item-title">Student B</span>
+                            <span class="item-desc">- Grade 5 (Elementary) - Absent</span>
+                        </div>
+                        <span class="item-time">Yesterday</span>
+                    </div>
+                    <div class="list-item" onclick="selectStudent('Student C')">
+                        <span class="material-symbols-outlined icon-btn drag-icon">drag_indicator</span>
+                        <div class="item-main">
+                            <span class="item-title">Student C</span>
+                            <span class="item-desc">- Grade 1 (Middle) - Checked In (16:30)</span>
+                        </div>
+                        <span class="item-time">16:30 PM</span>
                     </div>
                 </div>
-                <div class="student-card">
-                    <div class="avatar"><span class="material-symbols-outlined">person</span></div>
-                    <div class="info">
-                        <div class="name">Student B</div>
-                        <div class="grade">Grade 5</div>
+            </div>
+
+            <!-- Detail Panel -->
+            <div class="detail-panel">
+                <div class="panel-header">
+                    <span class="material-symbols-outlined icon-btn" style="visibility:hidden">arrow_back</span>
+                    <div class="actions">
+                        <span class="material-symbols-outlined icon-btn">print</span>
+                        <span class="material-symbols-outlined icon-btn">open_in_new</span>
                     </div>
                 </div>
-                <!-- More items can be added here -->
-            </div>
-        </aside>
-
-        <!-- Main Panel -->
-        <main class="main-panel">
-            <div class="detail-card">
-                <header class="detail-header">
-                    <div>
-                        <h2 class="student-name">Student A</h2>
-                        <span class="branch-name">Main Branch</span>
+                <div class="detail-content">
+                    <div class="detail-title-row">
+                        <h2 class="detail-title">Student A</h2>
+                        <span class="tag">Elementary</span>
                     </div>
-                </header>
 
-                <section class="flow-section">
-                    <h3>Daily Flow Check</h3>
-                    <div class="time-controls">
-                        <div class="time-group">
-                            <label>Check-in Time</label>
-                            <input type="time" id="checkInTime" class="md3-input">
-                        </div>
-                        <div class="time-group">
-                            <label>Check-out Time</label>
-                            <input type="time" id="checkOutTime" class="md3-input">
+                    <div class="section">
+                        <h3>Daily Flow Check</h3>
+                        <div class="form-row">
+                            <div class="input-group">
+                                <label>Check-in Time</label>
+                                <input type="time" id="checkinTime" class="md-input">
+                            </div>
+                            <div class="input-group">
+                                <label>Check-out Time</label>
+                                <input type="time" id="checkoutTime" class="md-input">
+                            </div>
                         </div>
                     </div>
-                </section>
 
-                <section class="tasks-section">
-                    <h3>Daily Routine Tasks</h3>
-                    <label class="md3-checkbox">
-                        <input type="checkbox" id="task1">
-                        <span class="checkmark"></span>
-                        Vocabulary Test
-                    </label>
-                    <label class="md3-checkbox">
-                        <input type="checkbox" id="task2">
-                        <span class="checkmark"></span>
-                        Math Review
-                    </label>
-                    <label class="md3-checkbox">
-                        <input type="checkbox" id="task3">
-                        <span class="checkmark"></span>
-                        Reading Assignment
-                    </label>
-                </section>
+                    <div class="section">
+                        <h3>Daily Routine Tasks</h3>
+                        <div class="checklist">
+                            <label class="check-item">
+                                <input type="checkbox" checked>
+                                <span>Vocabulary Test</span>
+                            </label>
+                            <label class="check-item">
+                                <input type="checkbox">
+                                <span>Math Review</span>
+                            </label>
+                            <label class="check-item">
+                                <input type="checkbox">
+                                <span>Reading Comprehension</span>
+                            </label>
+                            <label class="check-item">
+                                <input type="checkbox">
+                                <span>Homework Submission</span>
+                            </label>
+                        </div>
+                    </div>
 
-                <div class="actions">
-                    <button class="md3-btn md3-btn-filled" id="saveBtn">Save Changes</button>
+                    <button class="btn-primary" onclick="saveDailyFlow()">Save Changes</button>
                 </div>
             </div>
         </main>
     </div>
-
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
 </body>
+
 </html>

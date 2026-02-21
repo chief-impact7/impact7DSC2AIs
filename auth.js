@@ -1,39 +1,34 @@
-// auth.js
-import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
+import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { auth } from './firebase-config.js';
 
-// Note: Ensure Firebase is initialized in your main entry file (e.g., app.js or firebase-config.js)
-const auth = getAuth();
 const provider = new GoogleAuthProvider();
-
-// IMPORTANT: If you use Google Workspace for the academy, uncomment the line below 
-// and replace 'your-academy-domain.com' with your actual domain to restrict access.
-// provider.setCustomParameters({ hd: "your-academy-domain.com" });
+// Restrict login to the academy's Google Workspace domain
+provider.setCustomParameters({ hd: 'gw.impact7.kr' });
 
 /**
- * Handle Google Sign-In via Popup
- * @returns {Promise<Object>} The authenticated user object
+ * Sign in via Google popup, restricted to gw.impact7.kr accounts.
+ * @returns {Promise<Object>} Firebase user object
  */
 export const signInWithGoogle = async () => {
     try {
         const result = await signInWithPopup(auth, provider);
-        const user = result.user;
-        console.log(`[AUTH SUCCESS] Logged in as: ${user.email}`);
-        return user;
+        console.log(`[AUTH SUCCESS] Logged in as: ${result.user.email}`);
+        return result.user;
     } catch (error) {
-        console.error("[AUTH ERROR] Google Sign-In failed:", error.code, error.message);
+        console.error('[AUTH ERROR] Google Sign-In failed:', error.code, error.message);
         throw error;
     }
 };
 
 /**
- * Handle User Logout
+ * Sign out the current user.
  */
 export const logout = async () => {
     try {
         await signOut(auth);
-        console.log("[AUTH SUCCESS] User logged out successfully.");
+        console.log('[AUTH SUCCESS] User logged out.');
     } catch (error) {
-        console.error("[AUTH ERROR] Logout failed:", error);
+        console.error('[AUTH ERROR] Logout failed:', error);
         throw error;
     }
 };
