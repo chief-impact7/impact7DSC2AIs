@@ -1,7 +1,7 @@
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, getDocs, doc, setDoc, addDoc, deleteDoc, serverTimestamp, query, where, orderBy, writeBatch } from 'firebase/firestore';
 import { auth, db } from './firebase-config.js';
-import { signInWithGoogle, logout } from './auth.js';
+import { signInWithGoogle, logout, googleAccessToken } from './auth.js';
 
 let currentUser = null;
 let currentStudentId = null;
@@ -463,7 +463,9 @@ window.selectStudent = (studentId, studentData, targetElement) => {
 // docId generator (import-students.js와 동일한 방식)
 // ---------------------------------------------------------------------------
 const makeDocId = (name, parentPhone, branch) => {
-    const phone = (parentPhone || '').replace(/\D/g, '');
+    let phone = (parentPhone || '').replace(/\D/g, '');
+    // 한국 전화번호 정규화: 010XXXXXXXX → 10XXXXXXXX (기존 데이터 형식에 맞춤)
+    if (phone.length === 11 && phone.startsWith('0')) phone = phone.slice(1);
     return `${name}_${phone}_${branch}`.replace(/\s+/g, '_');
 };
 
@@ -1376,7 +1378,14 @@ window.handleSheetExport = async () => {
     }
 };
 
-window.handleSheetImport = async () => {
+window.handleUpload = () => {
+    const choice = prompt('업로드 방식을 선택하세요:\n\n1 — 구글시트에서 가져오기 (드라이브에서 선택)\n2 — CSV 파일 업로드\n3 — 빈 템플릿 시트 만들기', '1');
+    if (choice === '1') window.handleSheetPicker();
+    else if (choice === '2') window.handleCsvUpsert();
+    else if (choice === '3') window.handleSheetTemplate();
+};
+
+window.handleSheetTemplate = async () => {
     try {
         alert('가져오기 템플릿을 생성 중입니다... 잠시 기다려주세요.');
         const resp = await fetch(GAS_WEB_APP_URL + '?action=template&format=json');
@@ -1384,13 +1393,318 @@ window.handleSheetImport = async () => {
         if (json.url) {
             window.open(json.url, '_blank');
         } else {
-            alert('템플릿 생성 실패: ' + (json.error || '알 수 없는 오류'));
+            alert('시트 생성 실패: ' + (json.error || '알 수 없는 오류'));
         }
     } catch (e) {
         window.open(GAS_WEB_APP_URL + '?action=template', '_blank');
     }
 };
 
+// Google Picker — 드라이브에서 구글시트 선택 → 바로 가져오기
+let _pickerApiLoaded = false;
+
+function loadPickerApi() {
+    return new Promise((resolve) => {
+        if (_pickerApiLoaded) { resolve(); return; }
+        gapi.load('picker', () => { _pickerApiLoaded = true; resolve(); });
+    });
+}
+
+window.handleSheetPicker = async () => {
+    if (!googleAccessToken) {
+        alert('구글 드라이브 접근 권한이 필요합니다.\n로그아웃 후 다시 로그인해주세요.');
+        return;
+    }
+
+    await loadPickerApi();
+
+    const picker = new google.picker.PickerBuilder()
+        .setTitle('가져올 구글시트를 선택하세요')
+        .addView(
+            new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS)
+                .setMode(google.picker.DocsViewMode.LIST)
+        )
+        .setOAuthToken(googleAccessToken)
+        .setCallback(async (data) => {
+            if (data.action !== google.picker.Action.PICKED) return;
+            const sheetId = data.docs[0].id;
+            const sheetName = data.docs[0].name;
+            await importFromSheetId(sheetId, sheetName);
+        })
+        .build();
+
+    picker.setVisible(true);
+};
+
+async function importFromSheetId(sheetId, sheetName) {
+    try {
+        if (!confirm(`"${sheetName}" 시트에서 데이터를 가져올까요?`)) return;
+
+        // Google Sheets API로 시트 데이터 직접 읽기 (GAS 경유 없음)
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:Z`;
+        const resp = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+        });
+
+        if (!resp.ok) {
+            const errText = await resp.text();
+            alert('시트 읽기 실패: ' + errText);
+            return;
+        }
+
+        const data = await resp.json();
+        const sheetRows = data.values;
+        if (!sheetRows || sheetRows.length < 2) {
+            alert('시트에 데이터가 없습니다.');
+            return;
+        }
+
+        // GAS 템플릿 헤더 → 통합 upsert 필드명 매핑
+        const sheetHeaders = sheetRows[0];
+        const headerMap = {
+            '이름': '이름', '학부': '학부', '학교': '학교', '학년': '학년',
+            '학생연락처': '학생연락처', '학부모연락처1': '학부모연락처1', '학부모연락처2': '학부모연락처2',
+            '소속': 'branch',
+            '레벨기호': 'level_symbol',
+            '반넘버': 'class_number',
+            '수업종류': 'class_type',
+            '시작일': '시작일', '요일': '요일', '상태': '상태',
+        };
+
+        const rows = sheetRows.slice(1).map(row => {
+            const obj = {};
+            sheetHeaders.forEach((h, i) => {
+                const key = headerMap[h] || h;
+                obj[key] = (row[i] || '').toString().trim();
+            });
+            return obj;
+        });
+
+        await runUpsertFromRows(rows, sheetName);
+    } catch (e) {
+        alert('가져오기 실패: ' + e.message);
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// CSV Upsert — 브라우저에서 CSV 파일 업로드 → Firestore upsert
+// ---------------------------------------------------------------------------
+window.handleCsvUpsert = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+            const text = await file.text();
+            await runCsvUpsert(text, file.name);
+        } catch (err) {
+            alert('CSV 읽기 실패: ' + err.message);
+        }
+    };
+    input.click();
+};
+
+async function runCsvUpsert(csvText, fileName) {
+    // Parse CSV → rows
+    const lines = csvText.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length < 2) { alert('CSV에 데이터가 없습니다.'); return; }
+
+    const headers = lines[0].split(',').map(h => h.trim());
+    const rows = lines.slice(1).map(line => {
+        const vals = line.split(',');
+        const obj = {};
+        headers.forEach((h, i) => { obj[h] = (vals[i] || '').trim(); });
+        return obj;
+    });
+
+    // CSV 컬럼명으로 통일: 학부기호→level_symbol, 레벨기호→class_number, branch→branch
+    const normalized = rows.map(raw => ({
+        이름: raw['이름'] || '',
+        학부: raw['학부'] || '',
+        학교: raw['학교'] || '',
+        학년: raw['학년'] || '',
+        학생연락처: raw['학생연락처'] || '',
+        학부모연락처1: raw['학부모연락처1'] || '',
+        학부모연락처2: raw['학부모연락처2'] || '',
+        branch: raw['branch'] || '',
+        level_symbol: raw['학부기호'] || '',
+        class_number: raw['레벨기호'] || '',
+        class_type: raw['수업종류'] || '정규',
+        시작일: raw['시작일'] || '',
+        요일: raw['요일'] || '',
+        상태: raw['상태'] || '재원',
+    }));
+
+    await runUpsertFromRows(normalized, fileName);
+}
+
+/**
+ * 공통 Upsert 로직 — CSV, 구글시트 모두 이 함수로 통합
+ * rows: [{ 이름, 학부, 학교, 학년, 학생연락처, 학부모연락처1, 학부모연락처2,
+ *           branch, level_symbol, class_number, class_type, 시작일, 요일, 상태 }]
+ */
+async function runUpsertFromRows(rows, sourceName) {
+    if (!rows || rows.length === 0) { alert('데이터가 없습니다.'); return; }
+
+    // Group by docId
+    const studentMap = {};
+    for (const raw of rows) {
+        const name = raw['이름'];
+        const parentPhone = raw['학부모연락처1'] || raw['학생연락처'] || '';
+        if (!name) continue;
+
+        const classNumber = raw['class_number'] || '';
+        const branch = raw['branch'] || branchFromClassNumber(classNumber);
+        const docId = makeDocId(name, parentPhone, branch);
+
+        const dayRaw = raw['요일'] || '';
+        const dayArr = dayRaw.split(/[,\s]+/).map(d => d.replace(/요일$/, '')).filter(d => d);
+
+        const enrollment = {
+            class_type: raw['class_type'] || '정규',
+            level_symbol: raw['level_symbol'] || '',
+            class_number: classNumber,
+            day: dayArr,
+            start_date: raw['시작일'] || ''
+        };
+
+        if (!studentMap[docId]) {
+            studentMap[docId] = {
+                name, level: raw['학부'] || '', school: raw['학교'] || '',
+                grade: raw['학년'] || '', student_phone: raw['학생연락처'] || '',
+                parent_phone_1: parentPhone, parent_phone_2: raw['학부모연락처2'] || '',
+                branch, status: raw['상태'] || '재원', enrollments: []
+            };
+        }
+
+        const hasData = enrollment.level_symbol || enrollment.class_number || enrollment.start_date || dayArr.length > 0;
+        if (hasData) studentMap[docId].enrollments.push(enrollment);
+    }
+
+    // Fetch existing from Firestore (already loaded in allStudents)
+    // 실제 Firestore docId로 매칭 (재생성하지 않음)
+    const existingMap = {};
+    for (const s of allStudents) {
+        existingMap[s.id] = s;
+    }
+
+    // 4) Compare and classify
+    const infoFields = ['name', 'level', 'school', 'grade', 'student_phone', 'parent_phone_1', 'parent_phone_2', 'branch', 'status'];
+
+    const results = { inserted: [], updated: [], skipped: [] };
+    const writes = [];
+    const logEntries = [];
+
+    for (const [docId, incoming] of Object.entries(studentMap)) {
+        const ex = existingMap[docId];
+
+        if (!ex) {
+            // INSERT
+            results.inserted.push({ docId, name: incoming.name, enrollments: incoming.enrollments });
+            writes.push({ docId, data: incoming, type: 'set' });
+            logEntries.push({
+                doc_id: docId, change_type: 'ENROLL', before: '—',
+                after: `신규 등록: ${incoming.name} (${incoming.enrollments.map(enrollmentCode).join(', ') || '수업없음'})`
+            });
+        } else {
+            // DIFF basic info
+            const infoDiff = {};
+            for (const f of infoFields) {
+                const oldVal = (ex[f] || '').toString().trim();
+                const newVal = (incoming[f] || '').toString().trim();
+                if (newVal && newVal !== oldVal) infoDiff[f] = { old: oldVal, new: newVal };
+            }
+
+            // REPLACE enrollments — 새 데이터가 현재 상태를 나타냄
+            const oldCodes = (ex.enrollments || []).map(enrollmentCode).sort().join(',');
+            const newCodes = (incoming.enrollments || []).map(enrollmentCode).sort().join(',');
+            const enrollChanged = oldCodes !== newCodes;
+
+            const hasInfoChange = Object.keys(infoDiff).length > 0;
+
+            if (!hasInfoChange && !enrollChanged) {
+                results.skipped.push(docId);
+                continue;
+            }
+
+            const updateData = {};
+            for (const [f, v] of Object.entries(infoDiff)) updateData[f] = v.new;
+            if (enrollChanged) updateData.enrollments = incoming.enrollments;
+
+            results.updated.push({ docId, name: incoming.name, infoDiff, oldCodes, newCodes: (incoming.enrollments || []).map(enrollmentCode).join(', '), enrollChanged });
+            writes.push({ docId, data: updateData, type: 'merge' });
+
+            const bParts = [], aParts = [];
+            for (const [f, v] of Object.entries(infoDiff)) { bParts.push(`${f}:${v.old || '—'}`); aParts.push(`${f}:${v.new}`); }
+            if (enrollChanged) {
+                bParts.push(`수업: ${oldCodes || '—'}`);
+                aParts.push(`수업: ${(incoming.enrollments || []).map(enrollmentCode).join(', ')}`);
+            }
+
+            logEntries.push({
+                doc_id: docId, change_type: 'UPDATE',
+                before: bParts.join(', ') || '—', after: aParts.join(', ')
+            });
+        }
+    }
+
+    // 5) Show confirmation dialog
+    let msg = `📁 ${esc(sourceName)}\n\n`;
+    msg += `📥 신규 등록: ${results.inserted.length}명\n`;
+    msg += `📝 정보 변경: ${results.updated.length}명\n`;
+    msg += `⏭️ 변경 없음: ${results.skipped.length}명\n\n`;
+
+    if (results.inserted.length > 0) {
+        msg += `🆕 신규:\n`;
+        for (const r of results.inserted.slice(0, 20)) msg += `  + ${r.name} (${r.enrollments.map(enrollmentCode).join(', ')})\n`;
+        if (results.inserted.length > 20) msg += `  ... 외 ${results.inserted.length - 20}명\n`;
+        msg += '\n';
+    }
+    if (results.updated.length > 0) {
+        msg += `✏️ 변경:\n`;
+        for (const r of results.updated.slice(0, 20)) {
+            const parts = [];
+            for (const [f, v] of Object.entries(r.infoDiff)) parts.push(`${f}: ${v.old}→${v.new}`);
+            if (r.enrollChanged) parts.push(`수업: ${r.oldCodes || '—'}→${r.newCodes}`);
+            msg += `  ~ ${r.name}: ${parts.join(', ')}\n`;
+        }
+        if (results.updated.length > 20) msg += `  ... 외 ${results.updated.length - 20}명\n`;
+    }
+
+    if (writes.length === 0) { alert('변경사항이 없습니다.'); return; }
+
+    msg += `\n적용하시겠습니까?`;
+    if (!confirm(msg)) return;
+
+    // 6) Write to Firestore in batches
+    const BATCH_SIZE = 249;
+    let written = 0;
+    for (let i = 0; i < writes.length; i += BATCH_SIZE) {
+        const chunk = writes.slice(i, i + BATCH_SIZE);
+        const logChunk = logEntries.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+
+        for (const w of chunk) {
+            const ref = doc(db, 'students', w.docId);
+            if (w.type === 'set') batch.set(ref, w.data);
+            else batch.set(ref, w.data, { merge: true });
+        }
+
+        for (const log of logChunk) {
+            const logRef = doc(collection(db, 'history_logs'));
+            batch.set(logRef, { ...log, google_login_id: currentUser?.email || 'unknown', timestamp: serverTimestamp() });
+        }
+
+        await batch.commit();
+        written += chunk.length;
+    }
+
+    alert(`✅ 완료!\n\n신규: ${results.inserted.length}명\n변경: ${results.updated.length}명\n건너뜀: ${results.skipped.length}명`);
+    await loadStudentList();
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log('[impact7DB] Dashboard initialized.');

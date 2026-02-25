@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "import": "node --env-file=.env import-students.js",
+    "upsert": "node upsert-students.js",
+    "upsert:dry": "node upsert-students.js --dry-run",
     "check": "node --env-file=.env check-duplicates.js",
     "dedup": "node --env-file=.env dedup-students.js"
   },

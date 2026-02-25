@@ -7,6 +7,7 @@ credentials.json
 firebase-adminsdk.json
 firebase-key.json
 serviceAccountKey.json
+service-account.json
 
 # 2. Dependencies & Node Modules
 node_modules/
@@ -23,3 +24,4 @@ build/
 .DS_Store
 Thumbs.db
 .aider*
+.firebase-ci-token

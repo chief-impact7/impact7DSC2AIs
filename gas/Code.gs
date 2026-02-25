@@ -818,11 +818,125 @@ function onOpen() {
 // ---------------------------------------------------------------------------
 // Web App 진입점
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 원격 가져오기: sheetId로 시트 열어서 Firestore에 upsert, 결과를 JSON 반환
+// ---------------------------------------------------------------------------
+function importFromSheetById(sheetId) {
+  var ss = SpreadsheetApp.openById(sheetId);
+  var sheet = ss.getSheets()[0]; // 첫 번째 시트
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    return { imported: 0, errors: ['데이터가 없습니다. 2행부터 입력해주세요.'] };
+  }
+
+  var headers = data[0];
+  var imported = 0;
+  var errors = [];
+
+  // 학생별 enrollment 그룹핑 (docId 기준)
+  var studentMap = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var rowObj = {};
+    for (var j = 0; j < headers.length; j++) {
+      var cell = row[j];
+      if (cell instanceof Date) {
+        rowObj[headers[j]] = Utilities.formatDate(cell, 'Asia/Seoul', 'yyyy-MM-dd');
+      } else {
+        rowObj[headers[j]] = cell != null ? String(cell).trim() : '';
+      }
+    }
+
+    var name = rowObj['이름'];
+    var parentPhone = rowObj['학부모연락처1'];
+    if (!name || !parentPhone) continue;
+
+    var classNumber = rowObj['반넘버'] || '';
+    var branch = rowObj['소속'] || branchFromClassNumber(classNumber);
+    var phone = parentPhone.replace(/\D/g, '');
+    var docId = name + '_' + phone + '_' + branch;
+    docId = docId.replace(/\s+/g, '_');
+
+    var dayStr = rowObj['요일'] || '';
+    var dayArr = dayStr.split(/[,\s]+/).filter(function(d) { return d; });
+
+    var enrollment = {
+      class_type: rowObj['수업종류'] || '정규',
+      level_symbol: rowObj['레벨기호'] || '',
+      class_number: classNumber,
+      day: dayArr,
+      start_date: formatDateValue(rowObj['시작일'])
+    };
+    var endDate = formatDateValue(rowObj['종료일']);
+    if (endDate) enrollment.end_date = endDate;
+
+    if (!studentMap[docId]) {
+      studentMap[docId] = {
+        name: name,
+        level: rowObj['학부'] || '초등',
+        school: rowObj['학교'] || '',
+        grade: rowObj['학년'] || '',
+        student_phone: rowObj['학생연락처'] || '',
+        parent_phone_1: parentPhone,
+        parent_phone_2: rowObj['학부모연락처2'] || '',
+        branch: branch,
+        status: rowObj['상태'] || '재원',
+        pause_start_date: formatDateValue(rowObj['휴원시작일']),
+        pause_end_date: formatDateValue(rowObj['휴원종료일']),
+        enrollments: []
+      };
+    }
+    var hasEnrollData = enrollment.level_symbol || enrollment.class_number ||
+      enrollment.start_date || dayArr.length > 0;
+    if (hasEnrollData) {
+      studentMap[docId].enrollments.push(enrollment);
+    }
+  }
+
+  // Firestore에 저장
+  var docIds = Object.keys(studentMap);
+  for (var k = 0; k < docIds.length; k++) {
+    var did = docIds[k];
+    var student = studentMap[did];
+    try {
+      upsertDocument_('students', did, student);
+
+      var enrollCodes = student.enrollments.map(function(e) {
+        return (e.level_symbol || '') + (e.class_number || '');
+      }).filter(function(c) { return c; }).join(', ');
+
+      createDocument_('history_logs', {
+        doc_id: did,
+        change_type: 'UPDATE',
+        before: '—',
+        after: '시트 가져오기: ' + student.name + ' (상태:' + student.status + ', 반:' + enrollCodes + ')',
+        google_login_id: Session.getActiveUser().getEmail() || 'system',
+        timestamp: new Date().toISOString()
+      });
+      imported++;
+    } catch (e) {
+      errors.push(did + ': ' + e.message);
+    }
+  }
+
+  return { imported: imported, total: docIds.length, errors: errors };
+}
+
 function doGet(e) {
   var action = (e && e.parameter && e.parameter.action) || 'export';
   var format = (e && e.parameter && e.parameter.format) || 'html';
 
   try {
+    // action=import&sheetId=XXX → 시트에서 Firestore로 가져오기
+    if (action === 'import') {
+      var sheetId = e.parameter.sheetId;
+      if (!sheetId) throw new Error('sheetId 파라미터가 필요합니다.');
+      var result = importFromSheetById(sheetId);
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     var url;
     if (action === 'template') {
       url = createImportTemplate();

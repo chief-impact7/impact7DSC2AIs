@@ -11,6 +11,7 @@
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <link rel="stylesheet" href="style.css">
+    <script src="https://apis.google.com/js/api.js"></script>
 </head>
 
 <body>
@@ -152,7 +153,7 @@
                     </span>
                     <div class="actions">
                         <span class="material-symbols-outlined icon-btn" id="group-view-btn" title="그룹 뷰 (반별)" onclick="window.toggleGroupView()">view_agenda</span>
-                        <span class="material-symbols-outlined icon-btn" title="구글시트에서 업로드" onclick="window.handleSheetImport()">upload</span>
+                        <span class="material-symbols-outlined icon-btn" title="데이터 업로드" onclick="window.handleUpload()">upload</span>
                         <span class="material-symbols-outlined icon-btn" title="구글시트로 다운로드" onclick="window.handleSheetExport()">download</span>
                         <span class="material-symbols-outlined icon-btn" title="Refresh"
                             onclick="window.refreshStudents && window.refreshStudents()">refresh</span>
