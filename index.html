@@ -28,7 +28,7 @@
                 <span class="material-symbols-outlined search-icon">search</span>
                 <input type="text" id="studentSearchInput" placeholder="이름, 학교, 전화번호 또는 초성(ㄱㄴㄷ)으로 검색..." />
             </div>
-            <span class="material-symbols-outlined icon-btn">help</span>
+            <span class="material-symbols-outlined icon-btn" onclick="window.showGuide()" title="사용 가이드">help</span>
             <span class="material-symbols-outlined icon-btn">settings</span>
             <span class="material-symbols-outlined icon-btn">apps</span>
             <div class="avatar icon-btn" onclick="handleLogin()">G</div>
@@ -110,6 +110,16 @@
                 </ul>
             </details>
 
+            <!-- L1: Class (반별 필터 - 동적 생성) -->
+            <details class="l1-group" id="class-filter-group">
+                <summary class="menu-l1">
+                    <span class="material-symbols-outlined">class</span>Class
+                </summary>
+                <ul class="nav-list" id="class-filter-list">
+                    <li style="padding:8px 12px 8px 28px;font-size:12px;color:var(--text-sec);">로그인 후 표시됩니다</li>
+                </ul>
+            </details>
+
             <!-- L1: Scheduled (L2 토글) -->
             <details class="l1-group">
                 <summary class="menu-l1">
@@ -139,6 +149,43 @@
                     </li>
                 </ul>
             </details>
+
+            <!-- L1: On Leave (휴원 관리) -->
+            <details class="l1-group" id="on-leave-group">
+                <summary class="menu-l1 nav-item" data-filter-type="leave" data-filter-value="all">
+                    <span class="material-symbols-outlined">hotel</span>On Leave
+                    <span class="on-leave-count" id="on-leave-count"></span>
+                </summary>
+                <!-- L2: Expected (복귀 예정) -->
+                <details class="l2-group">
+                    <summary class="menu-l2 nav-item" data-filter-type="leave" data-filter-value="expected">
+                        <span class="material-symbols-outlined" style="font-size:16px;color:#137333;">event_upcoming</span>Expected
+                        <span class="on-leave-sub-count" id="on-leave-expected-count"></span>
+                    </summary>
+                    <ul class="nav-list">
+                        <li class="menu-l3 nav-item" data-filter-type="leave" data-filter-value="expected_actual">Actual (실휴원)</li>
+                        <li class="menu-l3 nav-item" data-filter-type="leave" data-filter-value="expected_pending">Pending (가휴원)</li>
+                    </ul>
+                </details>
+                <!-- L2: Non-Return (미복귀) -->
+                <details class="l2-group">
+                    <summary class="menu-l2 nav-item" data-filter-type="leave" data-filter-value="non_return">
+                        <span class="material-symbols-outlined" style="font-size:16px;color:#c5221f;">warning</span>Non-Return
+                        <span class="on-leave-sub-count" id="on-leave-nonreturn-count"></span>
+                    </summary>
+                    <ul class="nav-list">
+                        <li class="menu-l3 nav-item" data-filter-type="leave" data-filter-value="nonreturn_actual">Actual (실휴원)</li>
+                        <li class="menu-l3 nav-item" data-filter-type="leave" data-filter-value="nonreturn_pending">Pending (가휴원)</li>
+                    </ul>
+                </details>
+            </details>
+
+            <!-- L1: Daily Stats (일별 통계) -->
+            <div class="l1-group stats-nav-item">
+                <div class="menu-l1 nav-item" onclick="window.showDailyStats()">
+                    <span class="material-symbols-outlined">bar_chart</span>Daily Stats
+                </div>
+            </div>
         </nav>
 
         <!-- Main Content -->
@@ -157,16 +204,124 @@
                         <span class="material-symbols-outlined icon-btn" title="구글시트로 다운로드" onclick="window.handleSheetExport()">download</span>
                         <span class="material-symbols-outlined icon-btn" title="Refresh"
                             onclick="window.refreshStudents && window.refreshStudents()">refresh</span>
-                        <span class="material-symbols-outlined icon-btn">more_vert</span>
+                        <span class="material-symbols-outlined icon-btn" id="bulk-mode-btn" title="일괄 선택 모드" onclick="window.toggleBulkMode()">checklist</span>
                     </div>
+                </div>
+                <!-- 일괄처리 액션 바 -->
+                <div id="bulk-action-bar" class="bulk-action-bar" style="display:none;">
+                    <label class="bulk-select-all">
+                        <input type="checkbox" id="bulk-select-all-cb" onchange="window.toggleSelectAll(this.checked)">
+                        <span id="bulk-selected-count">0명 선택</span>
+                    </label>
+                    <div class="bulk-actions">
+                        <button class="bulk-btn-close" onclick="window.exitBulkMode()" title="선택 해제">
+                            <span class="material-symbols-outlined">close</span>
+                        </button>
+                    </div>
+                </div>
+                <!-- 일별 통계 뷰 -->
+                <div id="daily-stats-view" class="daily-stats-view" style="display:none;">
+                    <div class="stats-header">
+                        <button class="btn-cancel stats-back-btn" onclick="window.hideDailyStats()">
+                            <span class="material-symbols-outlined" style="font-size:18px;">arrow_back</span>
+                            목록으로
+                        </button>
+                        <h3 class="stats-title">
+                            <span class="material-symbols-outlined">bar_chart</span>
+                            일별 통계
+                        </h3>
+                        <input type="date" id="stats-date-input" class="field-input stats-date-input"
+                            onchange="window.onStatsDateChange(this.value)">
+                    </div>
+                    <div id="stats-content" class="stats-content"></div>
                 </div>
                 <div class="list-items">
                     <p style="padding:16px;color:var(--text-sec)">Please log in to view students.</p>
                 </div>
+                <!-- 초기 홈 화면 (모든 L1 닫힌 상태) -->
+                <div id="home-view" class="home-view" style="display:none;">
+                    <div class="home-content">
+                        <span class="material-symbols-outlined home-icon">school</span>
+                        <h2 class="home-title">impact7DB Dashboard</h2>
+                        <p class="home-desc">좌측 메뉴에서 카테고리를 선택하여<br>학생 목록을 확인하세요.</p>
+                        <div class="home-shortcuts">
+                            <button class="home-shortcut-btn" onclick="document.querySelector('.l1-group').open=true; window.clearFilters();">
+                                <span class="material-symbols-outlined">people</span>
+                                All Students
+                            </button>
+                            <button class="home-shortcut-btn" onclick="showNewStudentForm()">
+                                <span class="material-symbols-outlined">person_add</span>
+                                신규 등록
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Detail Panel -->
+            <!-- 리사이저 핸들 -->
+            <div class="panel-resizer" id="panel-resizer"></div>
+
             <div class="detail-panel">
+                <!-- 일괄 편집 뷰 (벌크 모드) -->
+                <div id="bulk-edit-view" style="display:none;">
+                    <div class="panel-header">
+                        <span class="form-header-title" id="bulk-edit-title">일괄 변경</span>
+                    </div>
+                    <div class="detail-content" style="padding:24px 28px;">
+                        <div class="bulk-edit-summary" id="bulk-edit-summary"></div>
+
+                        <!-- 상태 일괄 변경 -->
+                        <div class="bulk-edit-section">
+                            <h4 class="bulk-edit-section-title">
+                                <span class="material-symbols-outlined">toggle_on</span>상태 변경
+                            </h4>
+                            <div class="bulk-edit-row">
+                                <select class="field-select" id="bulk-status-select-panel">
+                                    <option value="">-- 선택 --</option>
+                                    <option value="등원예정">등원예정</option>
+                                    <option value="재원">재원</option>
+                                    <option value="실휴원">실휴원</option>
+                                    <option value="가휴원">가휴원</option>
+                                    <option value="퇴원">퇴원</option>
+                                </select>
+                                <button class="btn-save bulk-apply-btn" onclick="window.applyBulkStatus()">적용</button>
+                            </div>
+                        </div>
+
+                        <!-- 반 일괄 변경 -->
+                        <div class="bulk-edit-section">
+                            <h4 class="bulk-edit-section-title">
+                                <span class="material-symbols-outlined">class</span>반 변경
+                            </h4>
+                            <div class="bulk-edit-row">
+                                <input class="field-input" id="bulk-class-code" type="text" placeholder="예: HS103" style="flex:1;">
+                                <button class="btn-save bulk-apply-btn" onclick="window.applyBulkClass()">적용</button>
+                            </div>
+                        </div>
+
+                        <!-- 등원요일 일괄 변경 -->
+                        <div class="bulk-edit-section">
+                            <h4 class="bulk-edit-section-title">
+                                <span class="material-symbols-outlined">calendar_month</span>등원요일 변경
+                            </h4>
+                            <div class="day-checkboxes" id="bulk-day-checkboxes">
+                                <label class="day-check"><input type="checkbox" name="bulk_day" value="월">월</label>
+                                <label class="day-check"><input type="checkbox" name="bulk_day" value="화">화</label>
+                                <label class="day-check"><input type="checkbox" name="bulk_day" value="수">수</label>
+                                <label class="day-check"><input type="checkbox" name="bulk_day" value="목">목</label>
+                                <label class="day-check"><input type="checkbox" name="bulk_day" value="금">금</label>
+                                <label class="day-check"><input type="checkbox" name="bulk_day" value="토">토</label>
+                                <label class="day-check"><input type="checkbox" name="bulk_day" value="일">일</label>
+                            </div>
+                            <div class="bulk-edit-row" style="margin-top:8px;">
+                                <button class="btn-save bulk-apply-btn" onclick="window.applyBulkDays()">적용</button>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
                 <!-- 조회 모드 헤더 -->
                 <div class="panel-header" id="detail-header">
                     <span class="material-symbols-outlined icon-btn" style="visibility:hidden">arrow_back</span>

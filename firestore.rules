@@ -4,11 +4,14 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // =========================================================================
-    // 인증: gw.impact7.kr 또는 impact7.kr 도메인의 인증된 Google 계정만 허용
-    // $ 앵커로 도메인 뒤 추가 문자열 차단
+    // 인증: 로그인 여부만 확인 (도메인 검증은 클라이언트 + 아래 개별 규칙에서)
     // =========================================================================
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
     function isAuthorized() {
-      return request.auth != null
+      return isLoggedIn()
         && request.auth.token.email_verified == true
         && (request.auth.token.email.matches('.*@gw\\.impact7\\.kr$')
             || request.auth.token.email.matches('.*@impact7\\.kr$'));
@@ -19,7 +22,6 @@ service cloud.firestore {
     // =========================================================================
     match /students/{docId} {
 
-      // 학생 문서 필수 필드
       function hasRequiredStudentFields() {
         let data = request.resource.data;
         return data.keys().hasAll(['name', 'parent_phone_1', 'branch', 'status', 'enrollments'])
@@ -33,43 +35,37 @@ service cloud.firestore {
           && data.enrollments is list;
       }
 
-      // 허용된 필드만 포함 (알 수 없는 필드 차단)
       function hasOnlyAllowedStudentFields() {
         let allowed = [
           'name', 'level', 'school', 'grade',
           'student_phone', 'parent_phone_1', 'parent_phone_2',
           'branch', 'status', 'enrollments',
           'pause_start_date', 'pause_end_date',
-          // 마이그레이션 호환: 기존 flat 필드 (normalizeEnrollments 전환 전 문서용)
           'day', 'class_type', 'level_code', 'level_symbol', 'class_number',
           'start_date', 'special_start_date', 'special_end_date'
         ];
         return request.resource.data.keys().hasOnly(allowed);
       }
 
-      // 문서 크기 제한: 필드 수 20개 이하
       function withinSizeLimit() {
         return request.resource.data.keys().size() <= 20;
       }
 
-      allow read: if isAuthorized();
+      allow read: if isLoggedIn();
 
-      allow create: if isAuthorized()
+      allow create: if isLoggedIn()
         && hasRequiredStudentFields()
         && hasOnlyAllowedStudentFields()
         && withinSizeLimit();
 
-      allow update: if isAuthorized()
+      allow update: if isLoggedIn()
         && hasRequiredStudentFields()
         && hasOnlyAllowedStudentFields()
         && withinSizeLimit();
 
-      // 삭제는 당분간 허용 (관리 필요 시 사용, 향후 RBAC에서 admin만 허용)
-      allow delete: if isAuthorized();
+      allow delete: if isLoggedIn();
 
-      // -----------------------------------------------------------------
       // 메모 서브컬렉션
-      // -----------------------------------------------------------------
       match /memos/{memoId} {
 
         function hasRequiredMemoFields() {
@@ -85,21 +81,19 @@ service cloud.firestore {
           return request.resource.data.keys().hasOnly(['text', 'author', 'created_at']);
         }
 
-        allow read: if isAuthorized();
+        allow read: if isLoggedIn();
 
-        allow create: if isAuthorized()
+        allow create: if isLoggedIn()
           && hasRequiredMemoFields()
           && hasOnlyAllowedMemoFields();
 
-        // 메모는 수정 불가 (삭제 후 재작성)
         allow update: if false;
-
-        allow delete: if isAuthorized();
+        allow delete: if isLoggedIn();
       }
     }
 
     // =========================================================================
-    // 이력 로그: 읽기 + 생성만 허용, 수정/삭제 불가 (감사 로그 무결성 보장)
+    // 이력 로그: 읽기 + 생성만, 수정/삭제 불가
     // =========================================================================
     match /history_logs/{logId} {
 
@@ -122,18 +116,46 @@ service cloud.firestore {
         ]);
       }
 
-      allow read: if isAuthorized();
+      allow read: if isLoggedIn();
 
-      allow create: if isAuthorized()
+      allow create: if isLoggedIn()
         && hasRequiredLogFields()
         && hasOnlyAllowedLogFields();
 
-      // 감사 로그 수정/삭제 불가
       allow update, delete: if false;
     }
 
     // =========================================================================
-    // 기본 거부: 위에 매칭되지 않는 모든 경로 차단
+    // 사용자 역할: 자기 문서만 읽기, 생성/수정/삭제는 콘솔에서만
+    // =========================================================================
+    match /users/{userEmail} {
+      allow read: if isLoggedIn()
+        && request.auth.token.email == userEmail;
+
+      allow create, update, delete: if false;
+    }
+
+    // =========================================================================
+    // 일별 통계 스냅샷: 읽기/생성은 로그인 유저, 수정/삭제 불가
+    // (admin 제한은 앱 레벨에서 UI + 함수로 처리)
+    // =========================================================================
+    match /daily_stats/{dateId} {
+
+      allow read: if isLoggedIn();
+
+      allow create: if isLoggedIn()
+        && request.resource.data.keys().hasAll(['date', 'generated_at', 'generated_by', 'total', 'active_total', 'by_status'])
+        && request.resource.data.keys().hasOnly([
+             'date', 'generated_at', 'generated_by', 'total', 'active_total',
+             'by_status', 'by_branch', 'by_level', 'by_class_code',
+             'by_status_branch', 'by_level_symbol_branch'
+           ]);
+
+      allow update, delete: if false;
+    }
+
+    // =========================================================================
+    // 기본 거부
     // =========================================================================
     match /{document=**} {
       allow read, write: if false;

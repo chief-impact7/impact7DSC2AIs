@@ -1,16 +1,21 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, getDocs, doc, setDoc, addDoc, deleteDoc, serverTimestamp, query, where, orderBy, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, setDoc, addDoc, deleteDoc, serverTimestamp, query, where, orderBy, writeBatch } from 'firebase/firestore';
 import { auth, db } from './firebase-config.js';
 import { signInWithGoogle, logout, googleAccessToken } from './auth.js';
 
 let currentUser = null;
+let currentUserRole = null; // 'admin' | 'teacher' | null
 let currentStudentId = null;
 let allStudents = [];
 // 타입별 독립 필터 — 다른 타입끼리 AND 복합 적용
-let activeFilters = { level: null, branch: null, day: null, status: null, class_type: null };
+let activeFilters = { level: null, branch: null, day: null, status: null, class_type: null, class_code: null, leave: null };
 let isEditMode = false;
 let groupViewMode = 'none'; // 'none' | 'branch' | 'class'
 let _pendingEnrollments = []; // 신규등록 시 추가 수업 목록
+let bulkMode = false;
+let selectedStudentIds = new Set();
+let siblingMap = {};    // studentId → [siblingId, ...]
+let memoCache = {};     // studentId → true/false (메모 존재 여부)
 
 // HTML 이스케이프 — 사용자 입력을 innerHTML에 삽입할 때 XSS 방지
 const esc = (str) => {
@@ -147,6 +152,33 @@ const formatDate = (dateStr) => {
 // ---------------------------------------------------------------------------
 // Auth state
 // ---------------------------------------------------------------------------
+// 사용자 역할 로드
+async function loadUserRole(email) {
+    try {
+        console.log('[ROLE] Loading role for:', email);
+        const userDoc = await getDoc(doc(db, 'users', email));
+        if (userDoc.exists()) {
+            currentUserRole = userDoc.data().role || 'teacher';
+            console.log('[ROLE] Role loaded:', currentUserRole);
+        } else {
+            currentUserRole = 'teacher';
+            console.log('[ROLE] No user doc found, defaulting to teacher');
+        }
+    } catch (e) {
+        console.warn('[ROLE] Failed to load user role:', e.code, e.message);
+        currentUserRole = 'teacher';
+    }
+    applyRoleUI();
+}
+
+// 역할에 따른 UI 표시/숨김
+function applyRoleUI() {
+    const statsNav = document.querySelector('.stats-nav-item');
+    if (statsNav) {
+        statsNav.style.display = currentUserRole === 'admin' ? '' : 'none';
+    }
+}
+
 onAuthStateChanged(auth, async (user) => {
     const avatarBtn = document.querySelector('.avatar');
 
@@ -163,9 +195,12 @@ onAuthStateChanged(auth, async (user) => {
         currentUser = user;
         avatarBtn.textContent = user.email[0].toUpperCase();
         avatarBtn.title = `Logged in as ${user.email} (click to logout)`;
+        await loadUserRole(email);
         loadStudentList();
     } else {
         currentUser = null;
+        currentUserRole = null;
+        applyRoleUI();
         avatarBtn.textContent = 'G';
         avatarBtn.title = 'Login with Google';
         document.querySelector('.list-items').innerHTML =
@@ -211,7 +246,11 @@ async function loadStudentList() {
             allStudents.push(data);
         });
         allStudents.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
-        applyFilterAndRender();
+        buildSiblingMap();
+        buildClassFilterSidebar();
+        updateLeaveCountBadges();
+        loadMemoCacheAndRender();
+        generateDailyStatsIfNeeded();
     } catch (error) {
         console.error('[FIRESTORE ERROR] Failed to load students:', error);
         listContainer.innerHTML = '<p style="padding:16px;color:red">Failed to load students.</p>';
@@ -221,10 +260,248 @@ async function loadStudentList() {
 window.refreshStudents = loadStudentList;
 
 // ---------------------------------------------------------------------------
+// 일별 통계 스냅샷 (Daily Stats)
+// ---------------------------------------------------------------------------
+const getTodayDateStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+async function generateDailyStatsIfNeeded() {
+    const dateStr = getTodayDateStr();
+    const statsRef = doc(db, 'daily_stats', dateStr);
+    try {
+        const existing = await getDoc(statsRef);
+        if (existing.exists()) return; // 이미 생성됨
+
+        // 통계 집계
+        const byStatus = {};
+        const byBranch = {};
+        const byLevel = {};
+        const byClassCode = {};
+        const byStatusBranch = {}; // { '2단지': { 재원: N, ... }, '10단지': { ... } }
+        const byLevelSymbolBranch = {}; // { 'HA': { level: '고등', '2단지': N, '10단지': N }, ... }
+        let total = 0;
+        let activeTotal = 0; // 퇴원 제외
+
+        allStudents.forEach(s => {
+            total++;
+            const st = s.status || '재원';
+            byStatus[st] = (byStatus[st] || 0) + 1;
+            if (st !== '퇴원') activeTotal++;
+
+            const br = branchFromStudent(s);
+            if (br) {
+                byBranch[br] = (byBranch[br] || 0) + 1;
+                if (!byStatusBranch[br]) byStatusBranch[br] = {};
+                byStatusBranch[br][st] = (byStatusBranch[br][st] || 0) + 1;
+            }
+
+            const lv = s.level || '';
+            if (lv) byLevel[lv] = (byLevel[lv] || 0) + 1;
+
+            (s.enrollments || []).forEach(e => {
+                const code = enrollmentCode(e);
+                if (code) byClassCode[code] = (byClassCode[code] || 0) + 1;
+                const ls = e.level_symbol || '';
+                if (ls) {
+                    if (!byLevelSymbolBranch[ls]) byLevelSymbolBranch[ls] = { level: lv };
+                    if (br) byLevelSymbolBranch[ls][br] = (byLevelSymbolBranch[ls][br] || 0) + 1;
+                }
+            });
+        });
+
+        await setDoc(statsRef, {
+            date: dateStr,
+            generated_at: serverTimestamp(),
+            generated_by: currentUser?.email || 'unknown',
+            total,
+            active_total: activeTotal,
+            by_status: byStatus,
+            by_branch: byBranch,
+            by_level: byLevel,
+            by_class_code: byClassCode,
+            by_status_branch: byStatusBranch,
+            by_level_symbol_branch: byLevelSymbolBranch
+        });
+        console.log(`[DAILY STATS] Generated snapshot for ${dateStr}`);
+    } catch (e) {
+        console.warn('[DAILY STATS] Failed to generate:', e);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 형제(Sibling) 맵 빌드 — 부모 연락처가 같으면 형제
+// ---------------------------------------------------------------------------
+function buildSiblingMap() {
+    siblingMap = {};
+    const phoneToIds = {};
+    allStudents.forEach(s => {
+        const phones = [s.parent_phone_1, s.parent_phone_2]
+            .map(p => (p || '').replace(/\D/g, '')).filter(p => p.length >= 9);
+        phones.forEach(p => {
+            if (!phoneToIds[p]) phoneToIds[p] = [];
+            phoneToIds[p].push(s.id);
+        });
+    });
+    // 같은 전화번호를 공유하는 학생끼리 형제
+    Object.values(phoneToIds).forEach(ids => {
+        if (ids.length < 2) return;
+        ids.forEach(id => {
+            if (!siblingMap[id]) siblingMap[id] = new Set();
+            ids.forEach(sid => { if (sid !== id) siblingMap[id].add(sid); });
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------
+// 메모 존재 여부 캐시 — 비동기로 한 번만 로드
+// ---------------------------------------------------------------------------
+async function loadMemoCacheAndRender() {
+    memoCache = {};
+    // 먼저 목록을 바로 렌더
+    applyFilterAndRender();
+    // 백그라운드에서 메모 존재 여부 확인 후 아이콘 업데이트
+    try {
+        const checks = allStudents.map(async (s) => {
+            const snap = await getDocs(collection(db, 'students', s.id, 'memos'));
+            if (!snap.empty) memoCache[s.id] = true;
+        });
+        await Promise.all(checks);
+        // 메모 아이콘 업데이트를 위해 다시 렌더
+        applyFilterAndRender();
+    } catch (e) {
+        console.warn('[MEMO CACHE] Failed to load memo cache:', e);
+    }
+}
+
+// 개별 리스트 아이템의 아이콘만 업데이트 (전체 리렌더 없이)
+function updateListItemIcons(studentId) {
+    const el = document.querySelector(`.list-item[data-id="${studentId}"]`);
+    if (!el) return;
+    const titleSpan = el.querySelector('.item-title');
+    if (!titleSpan) return;
+    // 기존 아이콘 제거
+    titleSpan.querySelectorAll('.item-icon').forEach(ic => ic.remove());
+    // 상태 뱃지 앞에 다시 삽입
+    const statusEl = titleSpan.querySelector('.item-status');
+    const s = allStudents.find(s => s.id === studentId);
+    if (!s) return;
+    const hasSibling = siblingMap[s.id] && siblingMap[s.id].size > 0;
+    const hasMemo = memoCache[s.id];
+    const siblingNames = hasSibling ? [...siblingMap[s.id]].map(sid => allStudents.find(x => x.id === sid)?.name).filter(Boolean).join(', ') : '';
+    if (hasMemo) {
+        const m = document.createElement('span');
+        m.className = 'item-icon item-icon-memo';
+        m.title = '메모 있음';
+        m.innerHTML = '<span class="material-symbols-outlined">sticky_note_2</span>';
+        statusEl ? titleSpan.insertBefore(m, statusEl) : titleSpan.appendChild(m);
+    }
+    if (hasSibling) {
+        const si = document.createElement('span');
+        si.className = 'item-icon item-icon-sibling';
+        si.title = `형제: ${siblingNames}`;
+        si.innerHTML = '<span class="material-symbols-outlined">group</span>';
+        statusEl ? titleSpan.insertBefore(si, statusEl) : titleSpan.appendChild(si);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 사이드바 반별(Class) 필터 동적 생성
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// On Leave 카운트 업데이트
+// ---------------------------------------------------------------------------
+function updateLeaveCountBadges() {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const in10 = new Date(today); in10.setDate(in10.getDate() + 10);
+
+    const onLeave = allStudents.filter(s => s.status === '실휴원' || s.status === '가휴원');
+    const expected = onLeave.filter(s => {
+        const end = s.pause_end_date ? new Date(s.pause_end_date) : null;
+        if (!end) return false; end.setHours(0,0,0,0);
+        return end >= today && end <= in10;
+    });
+    const nonReturn = onLeave.filter(s => {
+        const end = s.pause_end_date ? new Date(s.pause_end_date) : null;
+        if (!end) return false; end.setHours(0,0,0,0);
+        return end < today;
+    });
+
+    const el1 = document.getElementById('on-leave-count');
+    const el2 = document.getElementById('on-leave-expected-count');
+    const el3 = document.getElementById('on-leave-nonreturn-count');
+    if (el1) el1.textContent = onLeave.length || '';
+    if (el2) el2.textContent = expected.length || '';
+    if (el3) el3.textContent = nonReturn.length || '';
+}
+
+function buildClassFilterSidebar() {
+    const list = document.getElementById('class-filter-list');
+    if (!list) return;
+
+    // branch 필터가 활성화되어 있으면 해당 branch 학생만 대상
+    let targetStudents = allStudents;
+    if (activeFilters.branch) {
+        targetStudents = allStudents.filter(s => branchFromStudent(s) === activeFilters.branch);
+    }
+
+    const codeCount = {};
+    targetStudents.forEach(s => {
+        allClassCodes(s).forEach(code => {
+            codeCount[code] = (codeCount[code] || 0) + 1;
+        });
+    });
+
+    const sortedCodes = Object.keys(codeCount).sort((a, b) => a.localeCompare(b, 'ko'));
+
+    if (sortedCodes.length === 0) {
+        list.innerHTML = '<li style="padding:8px 12px 8px 28px;font-size:12px;color:var(--text-sec);">등록된 반이 없습니다</li>';
+        return;
+    }
+
+    list.innerHTML = '';
+    sortedCodes.forEach(code => {
+        const li = document.createElement('li');
+        li.className = 'menu-l2 nav-item' + (activeFilters.class_code === code ? ' active' : '');
+        li.dataset.filterType = 'class_code';
+        li.dataset.filterValue = code;
+        li.innerHTML = `<span class="class-filter-item"><span class="class-filter-code">${esc(code)}</span></span><span class="class-filter-count">${codeCount[code]}</span>`;
+        li.addEventListener('click', () => {
+            if (activeFilters.class_code === code) {
+                activeFilters.class_code = null;
+                li.classList.remove('active');
+            } else {
+                list.querySelectorAll('.nav-item.active').forEach(el => el.classList.remove('active'));
+                activeFilters.class_code = code;
+                li.classList.add('active');
+            }
+            document.querySelector('.menu-l1[data-filter-type="all"]')?.classList.remove('active');
+            applyFilterAndRender();
+        });
+        list.appendChild(li);
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Filter + search then render
 // ---------------------------------------------------------------------------
 function applyFilterAndRender() {
+    // branch 필터가 바뀌면 class 목록 갱신 + 없어진 class_code 해제
+    buildClassFilterSidebar();
+    if (activeFilters.class_code) {
+        const classListEl = document.getElementById('class-filter-list');
+        const stillExists = classListEl?.querySelector(`[data-filter-value="${activeFilters.class_code}"]`);
+        if (!stillExists) activeFilters.class_code = null;
+    }
+
     let filtered = allStudents;
+
+    // 필터가 아무것도 활성화되지 않은 상태(All Students 기본) → 퇴원 제외
+    const hasAnyFilter = Object.values(activeFilters).some(v => v !== null);
+    if (!hasAnyFilter) {
+        filtered = filtered.filter(s => s.status !== '퇴원');
+    }
 
     // 각 타입별로 AND 조건 적용
     if (activeFilters.level) filtered = filtered.filter(s => s.level === activeFilters.level);
@@ -232,6 +509,32 @@ function applyFilterAndRender() {
     if (activeFilters.day) filtered = filtered.filter(s => combinedDays(s).includes(activeFilters.day));
     if (activeFilters.status) filtered = filtered.filter(s => s.status === activeFilters.status);
     if (activeFilters.class_type) filtered = filtered.filter(s => (s.enrollments || []).some(e => e.class_type === activeFilters.class_type));
+    if (activeFilters.class_code) filtered = filtered.filter(s => allClassCodes(s).includes(activeFilters.class_code));
+    if (activeFilters.leave) {
+        const lv = activeFilters.leave;
+        const today = new Date(); today.setHours(0,0,0,0);
+        const in10 = new Date(today); in10.setDate(in10.getDate() + 10);
+        const isOnLeave = (s) => s.status === '실휴원' || s.status === '가휴원';
+        const endDate = (s) => { const d = s.pause_end_date ? new Date(s.pause_end_date) : null; if (d) d.setHours(0,0,0,0); return d; };
+        const isExpected = (s) => { const e = endDate(s); return e && e >= today && e <= in10; };
+        const isNonReturn = (s) => { const e = endDate(s); return e && e < today; };
+
+        if (lv === 'all') {
+            filtered = filtered.filter(isOnLeave);
+        } else if (lv === 'expected') {
+            filtered = filtered.filter(s => isOnLeave(s) && isExpected(s));
+        } else if (lv === 'expected_actual') {
+            filtered = filtered.filter(s => s.status === '실휴원' && isExpected(s));
+        } else if (lv === 'expected_pending') {
+            filtered = filtered.filter(s => s.status === '가휴원' && isExpected(s));
+        } else if (lv === 'non_return') {
+            filtered = filtered.filter(s => isOnLeave(s) && isNonReturn(s));
+        } else if (lv === 'nonreturn_actual') {
+            filtered = filtered.filter(s => s.status === '실휴원' && isNonReturn(s));
+        } else if (lv === 'nonreturn_pending') {
+            filtered = filtered.filter(s => s.status === '가휴원' && isNonReturn(s));
+        }
+    }
 
     const term = document.getElementById('studentSearchInput')?.value.trim().toLowerCase() || '';
     if (term) {
@@ -274,6 +577,8 @@ window.clearFilters = () => {
     Object.keys(activeFilters).forEach(k => activeFilters[k] = null);
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
     document.querySelector('.menu-l1[data-filter-type="all"]')?.classList.add('active');
+    // 반별 필터 active 해제
+    document.querySelectorAll('#class-filter-list .nav-item').forEach(el => el.classList.remove('active'));
     applyFilterAndRender();
 };
 
@@ -297,21 +602,78 @@ function renderStudentList(students) {
 
 function renderStudentItem(s, container) {
     const div = document.createElement('div');
-    div.className = 'list-item';
+    div.className = 'list-item' + (bulkMode ? ' bulk-mode' : '') + (selectedStudentIds.has(s.id) ? ' bulk-selected' : '');
     div.dataset.id = s.id;
     const branch = branchFromStudent(s);
     const schoolShort = abbreviateSchool(s);
     const subLine = [branch, schoolShort !== '—' ? schoolShort : ''].filter(Boolean).join(' · ');
     const tags = allClassCodes(s).map(c => `<span class="item-tag">${esc(c)}</span>`).join('') || '<span class="item-tag">—</span>';
+
+    // 등원요일 표시
+    const dayOrder = ['월','화','수','목','금','토','일'];
+    const todayIdx = new Date().getDay(); // 0=일,1=월...
+    const todayKr = ['일','월','화','수','목','금','토'][todayIdx];
+    const days = combinedDays(s);
+    const dayDots = dayOrder.filter(d => days.includes(d))
+        .map(d => `<span class="item-day-dot${d === todayKr ? ' today' : ''}">${d}</span>`).join('');
+
+    // 상태 뱃지
+    const status = s.status || '';
+    const statusClass = status === '재원' ? 'st-active' : status === '등원예정' ? 'st-scheduled' : status === '실휴원' || status === '가휴원' ? 'st-paused' : status === '퇴원' ? 'st-withdrawn' : '';
+    const statusBadge = status ? `<span class="item-status ${statusClass}">${esc(status)}</span>` : '';
+
+    // 형제 아이콘
+    const hasSibling = siblingMap[s.id] && siblingMap[s.id].size > 0;
+    const siblingNames = hasSibling ? [...siblingMap[s.id]].map(sid => allStudents.find(x => x.id === sid)?.name).filter(Boolean).join(', ') : '';
+    const siblingIcon = hasSibling ? `<span class="item-icon item-icon-sibling" title="형제: ${esc(siblingNames)}"><span class="material-symbols-outlined">group</span></span>` : '';
+
+    // 메모 아이콘
+    const hasMemo = memoCache[s.id];
+    const memoIcon = hasMemo ? `<span class="item-icon item-icon-memo" title="메모 있음"><span class="material-symbols-outlined">sticky_note_2</span></span>` : '';
+
+    // 휴원종료일 표시 (실휴원/가휴원인 경우)
+    let pauseDateHtml = '';
+    if ((status === '실휴원' || status === '가휴원') && s.pause_end_date) {
+        const endDate = new Date(s.pause_end_date); endDate.setHours(0,0,0,0);
+        const now = new Date(); now.setHours(0,0,0,0);
+        const isOverdue = endDate < now;
+        const mm = String(endDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(endDate.getDate()).padStart(2, '0');
+        pauseDateHtml = `<span class="item-pause-date${isOverdue ? ' overdue' : ''}">${isOverdue ? '⚠ ' : ''}~${mm}/${dd}</span>`;
+    }
+
     div.innerHTML = `
+        <input type="checkbox" class="list-item-checkbox" ${selectedStudentIds.has(s.id) ? 'checked' : ''}>
         <span class="material-symbols-outlined drag-icon">person</span>
         <div class="item-main">
-            <span class="item-title">${s.name || '—'}</span>
+            <span class="item-title">${s.name || '—'}${siblingIcon}${memoIcon}${statusBadge}</span>
             <span class="item-desc">${subLine || '—'}</span>
         </div>
+        ${pauseDateHtml}
+        <div class="item-days">${dayDots}</div>
         <div class="item-tags">${tags}</div>
     `;
-    div.addEventListener('click', (e) => selectStudent(s.id, s, e.currentTarget));
+    const checkbox = div.querySelector('.list-item-checkbox');
+    checkbox.addEventListener('click', (e) => e.stopPropagation());
+    checkbox.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            selectedStudentIds.add(s.id);
+            div.classList.add('bulk-selected');
+        } else {
+            selectedStudentIds.delete(s.id);
+            div.classList.remove('bulk-selected');
+        }
+        updateBulkBar();
+    });
+    div.addEventListener('click', (e) => {
+        if (bulkMode) {
+            // 벌크 모드에서는 클릭으로 체크/해제
+            checkbox.checked = !checkbox.checked;
+            checkbox.dispatchEvent(new Event('change'));
+            return;
+        }
+        selectStudent(s.id, s, e.currentTarget);
+    });
     container.appendChild(div);
 }
 
@@ -391,6 +753,44 @@ document.querySelectorAll('.nav-item[data-filter-type]').forEach(item => {
         }
 
         applyFilterAndRender();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// 홈 화면 토글 — 모든 L1 <details>가 닫히면 홈 화면 표시
+// ---------------------------------------------------------------------------
+function checkHomeView() {
+    const l1Groups = document.querySelectorAll('.sidebar > details.l1-group');
+    const anyOpen = [...l1Groups].some(d => d.open);
+    const homeView = document.getElementById('home-view');
+    const panelHeader = document.querySelector('.list-panel > .panel-header');
+    const listItems = document.querySelector('.list-items');
+    const statsView = document.getElementById('daily-stats-view');
+
+    if (!homeView) return;
+
+    if (!anyOpen && !(statsView && statsView.style.display !== 'none')) {
+        homeView.style.display = 'flex';
+        if (panelHeader) panelHeader.style.display = 'none';
+        if (listItems) listItems.style.display = 'none';
+        document.getElementById('bulk-action-bar')?.style && (document.getElementById('bulk-action-bar').style.display = 'none');
+    } else {
+        homeView.style.display = 'none';
+        if (panelHeader) panelHeader.style.display = '';
+        if (listItems) listItems.style.display = '';
+    }
+}
+
+document.querySelectorAll('.sidebar > details.l1-group').forEach(details => {
+    details.addEventListener('toggle', () => {
+        // L1이 열리면 필터 초기화 후 해당 섹션 활성화
+        if (details.open) {
+            const homeView = document.getElementById('home-view');
+            if (homeView) homeView.style.display = 'none';
+            document.querySelector('.list-panel > .panel-header').style.display = '';
+            document.querySelector('.list-items').style.display = '';
+        }
+        checkHomeView();
     });
 });
 
@@ -1798,6 +2198,10 @@ window.deleteMemo = async (studentId, memoId) => {
     if (!confirm('이 메모를 삭제하시겠습니까?')) return;
     try {
         await deleteDoc(doc(db, 'students', studentId, 'memos', memoId));
+        // 메모 캐시 업데이트: 남은 메모가 있는지 확인
+        const remaining = await getDocs(collection(db, 'students', studentId, 'memos'));
+        if (remaining.empty) { delete memoCache[studentId]; }
+        updateListItemIcons(studentId);
         await loadMemos(studentId);
     } catch (e) {
         alert('삭제 실패: ' + e.message);
@@ -1835,6 +2239,8 @@ window.saveMemoFromModal = async () => {
             created_at: serverTimestamp(),
             author: currentUser?.email || 'system',
         });
+        memoCache[currentStudentId] = true;
+        updateListItemIcons(currentStudentId);
         document.getElementById('memo-modal').style.display = 'none';
         _memoModalContext = null;
         if (ctx === 'form') await loadFormMemos(currentStudentId);
@@ -1996,3 +2402,607 @@ function renderHistory(logs) {
         container.appendChild(item);
     });
 }
+
+// ---------------------------------------------------------------------------
+// 일괄처리 (Bulk Actions)
+// ---------------------------------------------------------------------------
+window.toggleBulkMode = () => {
+    if (bulkMode) window.exitBulkMode();
+    else enterBulkMode();
+};
+
+function showBulkEditPanel() {
+    // 우측 패널: 기존 뷰 숨기고 벌크 편집 뷰 표시
+    document.getElementById('detail-header').style.display = 'none';
+    document.getElementById('detail-tab-bar').style.display = 'none';
+    document.getElementById('detail-view').style.display = 'none';
+    document.getElementById('history-view').style.display = 'none';
+    document.getElementById('detail-form').style.display = 'none';
+    document.getElementById('form-header').style.display = 'none';
+    document.getElementById('bulk-edit-view').style.display = 'flex';
+    updateBulkEditSummary();
+}
+
+function hideBulkEditPanel() {
+    document.getElementById('bulk-edit-view').style.display = 'none';
+    document.getElementById('detail-header').style.display = 'flex';
+    document.getElementById('detail-tab-bar').style.display = 'flex';
+    document.getElementById('detail-view').style.display = 'block';
+    // 입력 필드 초기화
+    const statusSel = document.getElementById('bulk-status-select-panel');
+    if (statusSel) statusSel.value = '';
+    const classCodeEl = document.getElementById('bulk-class-code');
+    if (classCodeEl) classCodeEl.value = '';
+    document.querySelectorAll('#bulk-day-checkboxes input').forEach(cb => cb.checked = false);
+}
+
+function updateBulkEditSummary() {
+    const el = document.getElementById('bulk-edit-summary');
+    const titleEl = document.getElementById('bulk-edit-title');
+    if (!el) return;
+    const count = selectedStudentIds.size;
+    if (titleEl) titleEl.textContent = `일괄 변경 (${count}명)`;
+    if (count === 0) {
+        el.innerHTML = '목록에서 학생을 선택하세요';
+        return;
+    }
+    const names = [...selectedStudentIds].slice(0, 5).map(id => {
+        const s = allStudents.find(s => s.id === id);
+        return s?.name || id;
+    });
+    const more = count > 5 ? ` 외 ${count - 5}명` : '';
+    el.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px;">group</span>${esc(names.join(', '))}${more}`;
+}
+
+function enterBulkMode() {
+    bulkMode = true;
+    document.getElementById('bulk-action-bar').style.display = 'flex';
+    const btn = document.getElementById('bulk-mode-btn');
+    if (btn) { btn.classList.add('active'); }
+    document.querySelectorAll('.list-item').forEach(el => el.classList.add('bulk-mode'));
+    showBulkEditPanel();
+    updateBulkBar();
+}
+
+function updateBulkBar() {
+    const count = selectedStudentIds.size;
+    const countEl = document.getElementById('bulk-selected-count');
+    const selectAllCb = document.getElementById('bulk-select-all-cb');
+    if (countEl) countEl.textContent = `${count}명 선택`;
+
+    // 현재 보이는 학생 목록 기준으로 전체선택 상태 판단
+    const visibleCheckboxes = document.querySelectorAll('.list-item-checkbox');
+    const allChecked = visibleCheckboxes.length > 0 && [...visibleCheckboxes].every(cb => cb.checked);
+    if (selectAllCb) selectAllCb.checked = allChecked;
+
+    if (count > 0 && !bulkMode) enterBulkMode();
+    updateBulkEditSummary();
+}
+
+window.toggleSelectAll = (checked) => {
+    if (!bulkMode) enterBulkMode();
+    document.querySelectorAll('.list-item-checkbox').forEach(cb => {
+        cb.checked = checked;
+        const item = cb.closest('.list-item');
+        const id = item?.dataset.id;
+        if (id) {
+            if (checked) {
+                selectedStudentIds.add(id);
+                item.classList.add('bulk-selected');
+            } else {
+                selectedStudentIds.delete(id);
+                item.classList.remove('bulk-selected');
+            }
+        }
+    });
+    updateBulkBar();
+};
+
+window.exitBulkMode = () => {
+    bulkMode = false;
+    selectedStudentIds.clear();
+    document.getElementById('bulk-action-bar').style.display = 'none';
+    const btn = document.getElementById('bulk-mode-btn');
+    if (btn) btn.classList.remove('active');
+    document.querySelectorAll('.list-item').forEach(el => {
+        el.classList.remove('bulk-mode', 'bulk-selected');
+    });
+    document.querySelectorAll('.list-item-checkbox').forEach(cb => cb.checked = false);
+    const selectAllCb = document.getElementById('bulk-select-all-cb');
+    if (selectAllCb) selectAllCb.checked = false;
+    hideBulkEditPanel();
+};
+
+// ---------------------------------------------------------------------------
+// 일괄 상태 변경 (우측 패널)
+// ---------------------------------------------------------------------------
+window.applyBulkStatus = async () => {
+    const newStatus = document.getElementById('bulk-status-select-panel').value;
+    if (!newStatus) { alert('변경할 상태를 선택해주세요.'); return; }
+    if (selectedStudentIds.size === 0) { alert('학생을 선택해주세요.'); return; }
+
+    if (!confirm(`선택한 ${selectedStudentIds.size}명의 상태를 '${newStatus}'(으)로 변경합니다.`)) return;
+
+    const ids = [...selectedStudentIds];
+    try {
+        const batch = writeBatch(db);
+        const changes = [];
+
+        ids.forEach(id => {
+            const student = allStudents.find(s => s.id === id);
+            if (!student) return;
+            const oldStatus = student.status || '—';
+            if (oldStatus === newStatus) return;
+            batch.update(doc(db, 'students', id), { status: newStatus });
+            changes.push({ id, name: student.name, from: oldStatus, to: newStatus });
+        });
+
+        if (changes.length === 0) { alert('변경할 학생이 없습니다. (이미 같은 상태)'); return; }
+
+        await batch.commit();
+
+        for (const c of changes) {
+            await addDoc(collection(db, 'history_logs'), {
+                doc_id: c.id, change_type: 'UPDATE',
+                before: `상태: ${c.from}`, after: `상태: ${c.to} (일괄변경)`,
+                google_login_id: currentUser?.email || '—', timestamp: serverTimestamp()
+            });
+        }
+
+        changes.forEach(c => { const s = allStudents.find(s => s.id === c.id); if (s) s.status = newStatus; });
+        document.getElementById('bulk-status-select-panel').value = '';
+        applyFilterAndRender();
+        updateBulkEditSummary();
+        alert(`${changes.length}명의 상태를 '${newStatus}'(으)로 변경했습니다.`);
+    } catch (e) {
+        console.error('[BULK STATUS ERROR]', e);
+        alert('일괄 상태 변경 실패: ' + e.message);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// 일괄 반 변경 (우측 패널)
+// ---------------------------------------------------------------------------
+window.applyBulkClass = async () => {
+    const raw = document.getElementById('bulk-class-code').value.trim().toUpperCase();
+    if (!raw) { alert('반코드를 입력해주세요. (예: HX103)'); return; }
+    if (selectedStudentIds.size === 0) { alert('학생을 선택해주세요.'); return; }
+
+    // 반코드에서 레벨기호(영문)와 반넘버(숫자) 자동 분리
+    const match = raw.match(/^([A-Za-z]+)(\d+)$/);
+    if (!match) { alert('반코드 형식이 올바르지 않습니다. (예: HX103, HA201)'); return; }
+    const levelSymbol = match[1];
+    const classNumber = match[2];
+
+    if (!confirm(`선택한 ${selectedStudentIds.size}명의 반을 '${raw}'(으)로 변경합니다.`)) return;
+
+    const ids = [...selectedStudentIds];
+    try {
+        const batch = writeBatch(db);
+        const changes = [];
+
+        ids.forEach(id => {
+            const student = allStudents.find(s => s.id === id);
+            if (!student || !student.enrollments?.length) return;
+            const oldCode = enrollmentCode(student.enrollments[0]);
+            const updated = [...student.enrollments];
+            updated[0] = { ...updated[0], level_symbol: levelSymbol, class_number: classNumber };
+
+            const newBranch = branchFromClassNumber(classNumber);
+            const updateData = { enrollments: updated };
+            if (newBranch) updateData.branch = newBranch;
+
+            batch.update(doc(db, 'students', id), updateData);
+            changes.push({ id, name: student.name, from: oldCode, to: raw });
+        });
+
+        if (changes.length === 0) { alert('변경할 학생이 없습니다.'); return; }
+
+        await batch.commit();
+
+        for (const c of changes) {
+            await addDoc(collection(db, 'history_logs'), {
+                doc_id: c.id, change_type: 'UPDATE',
+                before: `반: ${c.from}`, after: `반: ${c.to} (일괄변경)`,
+                google_login_id: currentUser?.email || '—', timestamp: serverTimestamp()
+            });
+        }
+
+        ids.forEach(id => {
+            const s = allStudents.find(s => s.id === id);
+            if (s && s.enrollments?.length) {
+                s.enrollments[0].level_symbol = levelSymbol;
+                s.enrollments[0].class_number = classNumber;
+                const newBranch = branchFromClassNumber(classNumber);
+                if (newBranch) s.branch = newBranch;
+            }
+        });
+
+        document.getElementById('bulk-class-code').value = '';
+        buildClassFilterSidebar();
+        applyFilterAndRender();
+        updateBulkEditSummary();
+        alert(`${changes.length}명의 반을 '${raw}'(으)로 변경했습니다.`);
+    } catch (e) {
+        console.error('[BULK CLASS ERROR]', e);
+        alert('일괄 반 변경 실패: ' + e.message);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// 일괄 등원요일 변경 (우측 패널)
+// ---------------------------------------------------------------------------
+window.applyBulkDays = async () => {
+    const checked = [...document.querySelectorAll('#bulk-day-checkboxes input:checked')].map(cb => cb.value);
+    if (checked.length === 0) { alert('변경할 요일을 선택해주세요.'); return; }
+    if (selectedStudentIds.size === 0) { alert('학생을 선택해주세요.'); return; }
+
+    if (!confirm(`선택한 ${selectedStudentIds.size}명의 등원요일을 '${checked.join(', ')}'(으)로 변경합니다.`)) return;
+
+    const ids = [...selectedStudentIds];
+    try {
+        const batch = writeBatch(db);
+        const changes = [];
+
+        ids.forEach(id => {
+            const student = allStudents.find(s => s.id === id);
+            if (!student || !student.enrollments?.length) return;
+            const oldDays = displayDays(student.enrollments[0].day);
+            const updated = [...student.enrollments];
+            updated[0] = { ...updated[0], day: [...checked] };
+            batch.update(doc(db, 'students', id), { enrollments: updated });
+            changes.push({ id, name: student.name, from: oldDays, to: checked.join(', ') });
+        });
+
+        if (changes.length === 0) { alert('변경할 학생이 없습니다.'); return; }
+
+        await batch.commit();
+
+        for (const c of changes) {
+            await addDoc(collection(db, 'history_logs'), {
+                doc_id: c.id, change_type: 'UPDATE',
+                before: `요일: ${c.from}`, after: `요일: ${c.to} (일괄변경)`,
+                google_login_id: currentUser?.email || '—', timestamp: serverTimestamp()
+            });
+        }
+
+        // 로컬 데이터 업데이트
+        ids.forEach(id => {
+            const s = allStudents.find(s => s.id === id);
+            if (s && s.enrollments?.length) {
+                s.enrollments[0].day = [...checked];
+            }
+        });
+
+        document.querySelectorAll('#bulk-day-checkboxes input').forEach(cb => cb.checked = false);
+        applyFilterAndRender();
+        updateBulkEditSummary();
+        alert(`${changes.length}명의 등원요일을 변경했습니다.`);
+    } catch (e) {
+        console.error('[BULK DAYS ERROR]', e);
+        alert('일괄 요일 변경 실패: ' + e.message);
+    }
+};
+
+// ---------------------------------------------------------------------------
+// 일괄 삭제
+// ---------------------------------------------------------------------------
+window.bulkDelete = () => {
+    if (selectedStudentIds.size === 0) { alert('학생을 선택해주세요.'); return; }
+    const ids = [...selectedStudentIds];
+    const desc = document.getElementById('bulk-delete-desc');
+    if (desc) desc.innerHTML = `선택한 <strong>${ids.length}명</strong>의 학생을 삭제합니다.<br><span style="color:#c5221f;font-size:13px;">이 작업은 되돌릴 수 없습니다.</span>`;
+
+    const listEl = document.getElementById('bulk-delete-list');
+    if (listEl) {
+        listEl.innerHTML = ids.map(id => {
+            const s = allStudents.find(s => s.id === id);
+            return `<div class="bulk-delete-item"><span>${esc(s?.name || id)}</span><span style="font-size:12px;color:var(--text-sec);">${allClassCodes(s || {}).join(', ') || '—'}</span></div>`;
+        }).join('');
+    }
+    document.getElementById('bulk-delete-modal').style.display = 'flex';
+};
+
+window.closeBulkDeleteModal = (e) => {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('bulk-delete-modal').style.display = 'none';
+};
+
+window.confirmBulkDelete = async () => {
+    const ids = [...selectedStudentIds];
+    const confirmBtn = document.querySelector('#bulk-delete-modal .btn-end-class-confirm');
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = '삭제 중...'; }
+
+    try {
+        const batch = writeBatch(db);
+        ids.forEach(id => {
+            batch.delete(doc(db, 'students', id));
+        });
+        await batch.commit();
+
+        for (const id of ids) {
+            const s = allStudents.find(s => s.id === id);
+            await addDoc(collection(db, 'history_logs'), {
+                doc_id: id, change_type: 'WITHDRAW',
+                before: `학생: ${s?.name || id}`, after: '일괄 삭제',
+                google_login_id: currentUser?.email || '—', timestamp: serverTimestamp()
+            });
+        }
+
+        allStudents = allStudents.filter(s => !ids.includes(s.id));
+        window.closeBulkDeleteModal();
+        window.exitBulkMode();
+        buildClassFilterSidebar();
+        applyFilterAndRender();
+        currentStudentId = null;
+        alert(`${ids.length}명의 학생이 삭제되었습니다.`);
+    } catch (e) {
+        console.error('[BULK DELETE ERROR]', e);
+        alert('일괄 삭제 실패: ' + e.message);
+    } finally {
+        if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = '삭제'; }
+    }
+};
+
+// ---------------------------------------------------------------------------
+// 일별 통계 뷰어 (Daily Stats Viewer)
+// ---------------------------------------------------------------------------
+let statsViewActive = false;
+
+window.showDailyStats = async () => {
+    if (currentUserRole !== 'admin') return;
+    statsViewActive = true;
+    const statsView = document.getElementById('daily-stats-view');
+    const listPanel = document.querySelector('.list-panel');
+    if (!statsView || !listPanel) return;
+
+    // 목록 패널 내용을 통계 뷰로 교체
+    statsView.style.display = 'block';
+    listPanel.querySelector('.panel-header').style.display = 'none';
+    document.getElementById('bulk-action-bar')?.style && (document.getElementById('bulk-action-bar').style.display = 'none');
+    listPanel.querySelector('.list-items').style.display = 'none';
+
+    // 오늘 날짜로 로드
+    const dateInput = document.getElementById('stats-date-input');
+    dateInput.value = getTodayDateStr();
+    await loadStatsForDate(getTodayDateStr());
+};
+
+window.hideDailyStats = () => {
+    statsViewActive = false;
+    const statsView = document.getElementById('daily-stats-view');
+    const listPanel = document.querySelector('.list-panel');
+    if (!statsView || !listPanel) return;
+
+    statsView.style.display = 'none';
+    listPanel.querySelector('.panel-header').style.display = '';
+    listPanel.querySelector('.list-items').style.display = '';
+};
+
+window.onStatsDateChange = async (dateStr) => {
+    if (dateStr) await loadStatsForDate(dateStr);
+};
+
+async function loadStatsForDate(dateStr) {
+    const container = document.getElementById('stats-content');
+    if (!container) return;
+    container.innerHTML = '<p style="padding:16px;color:var(--text-sec)">로딩 중...</p>';
+
+    try {
+        const statsRef = doc(db, 'daily_stats', dateStr);
+        const snap = await getDoc(statsRef);
+
+        if (!snap.exists()) {
+            container.innerHTML = `<p style="padding:24px;color:var(--text-sec);text-align:center;">
+                <span class="material-symbols-outlined" style="font-size:48px;display:block;margin-bottom:8px;color:#dadce0;">event_busy</span>
+                ${esc(dateStr)}의 통계 데이터가 없습니다.<br>
+                <small>해당일에 로그인한 기록이 없거나 아직 생성되지 않았습니다.</small>
+            </p>`;
+            return;
+        }
+
+        const data = snap.data();
+        renderStatsView(data, container);
+    } catch (e) {
+        console.error('[DAILY STATS] Load error:', e);
+        container.innerHTML = '<p style="padding:16px;color:red">통계 로드 실패</p>';
+    }
+}
+
+function renderStatsView(data, container) {
+    const genAt = data.generated_at?.toDate?.() || null;
+    const genStr = genAt ? `${genAt.getFullYear()}-${String(genAt.getMonth()+1).padStart(2,'0')}-${String(genAt.getDate()).padStart(2,'0')} ${String(genAt.getHours()).padStart(2,'0')}:${String(genAt.getMinutes()).padStart(2,'0')}` : '—';
+
+    const bs = data.by_status || {};
+    const bsb = data.by_status_branch || {};
+    // 현인원 = 재원 + 실휴원 + 가휴원
+    const activeCount = (src) => (src['재원'] || 0) + (src['실휴원'] || 0) + (src['가휴원'] || 0);
+    // 표 행 순서: 현인원(합계), 실인원(=재원), 실휴원, 가휴원, 등원예정, 퇴원
+    const dataRows = [
+        { label: '실인원', key: '재원' },
+        { label: '실휴원', key: '실휴원' },
+        { label: '가휴원', key: '가휴원' },
+        { label: '등원예정', key: '등원예정' },
+        { label: '퇴원', key: '퇴원' },
+    ];
+
+    // ── 상태별 × 단지별 테이블 ──
+    let html = `
+        <div class="stats-meta">
+            <span>생성: ${esc(genStr)}</span>
+            <span>작성자: ${esc(data.generated_by || '—')}</span>
+        </div>
+
+        <div class="stats-section">
+            <h4 class="stats-section-title">
+                <span class="material-symbols-outlined">groups</span>인원 현황
+            </h4>
+            <table class="stats-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>전체</th>
+                        <th>2단지</th>
+                        <th>10단지</th>
+                    </tr>
+                </thead>
+                <tbody>`;
+
+    // 현인원 (재원 + 실휴원 + 가휴원) — 하이라이트
+    html += `<tr class="stats-table-highlight">
+        <td class="stats-table-label">현인원</td>
+        <td><strong>${activeCount(bs)}</strong></td>
+        <td><strong>${activeCount(bsb['2단지'] || {})}</strong></td>
+        <td><strong>${activeCount(bsb['10단지'] || {})}</strong></td>
+    </tr>`;
+
+    // 실인원(=재원), 실휴원, 가휴원, 등원예정, 퇴원
+    dataRows.forEach(({ label, key }) => {
+        html += `<tr>
+            <td class="stats-table-label">${esc(label)}</td>
+            <td>${bs[key] || 0}</td>
+            <td>${bsb['2단지']?.[key] || 0}</td>
+            <td>${bsb['10단지']?.[key] || 0}</td>
+        </tr>`;
+    });
+
+    html += `</tbody></table></div>`;
+
+    // ── 인원 현황 그래프 (stacked bar: 2단지 + 10단지) ──
+    const chartRows = [
+        { label: '현인원', val: activeCount(bs), v2: activeCount(bsb['2단지'] || {}), v10: activeCount(bsb['10단지'] || {}) },
+        ...dataRows.map(({ label, key }) => ({
+            label,
+            val: bs[key] || 0,
+            v2: bsb['2단지']?.[key] || 0,
+            v10: bsb['10단지']?.[key] || 0,
+        }))
+    ];
+    const chartMax = Math.max(...chartRows.map(r => r.val), 1);
+
+    html += `
+    <div class="stats-section">
+        <h4 class="stats-section-title">
+            <span class="material-symbols-outlined">bar_chart</span>인원 현황 그래프
+            <span class="stats-legend">
+                <span class="stats-legend-dot" style="background:#4285f4"></span>2단지
+                <span class="stats-legend-dot" style="background:#fbbc04"></span>10단지
+            </span>
+        </h4>
+        <div class="stats-bar-list">`;
+
+    chartRows.forEach((r, i) => {
+        const pct2 = (r.v2 / chartMax) * 100;
+        const pct10 = (r.v10 / chartMax) * 100;
+        const isHighlight = i === 0;
+        html += `
+        <div class="stats-bar-item${isHighlight ? ' stats-bar-highlight' : ''}">
+            <span class="stats-bar-label">${esc(r.label)}</span>
+            <div class="stats-bar-track">
+                <div class="stats-bar-fill stats-bar-stack" style="width:${pct2}%;background:#4285f4"></div><div class="stats-bar-fill stats-bar-stack" style="width:${pct10}%;background:#fbbc04"></div>
+            </div>
+            <span class="stats-bar-value">${r.v2}+${r.v10}=${r.val}</span>
+        </div>`;
+    });
+
+    html += `</div></div>`;
+
+    // ── 레벨기호별 (stacked bar: 2단지 + 10단지) ──
+    const lsb = data.by_level_symbol_branch || {};
+    const lsKeys = Object.keys(lsb);
+    if (lsKeys.length) {
+        // 학부 순서 매핑: 초등=0, 중등=1, 고등=2
+        const levelOrder = { '초등': 0, '중등': 1, '고등': 2 };
+        const sorted = lsKeys.sort((a, b) => {
+            const la = levelOrder[lsb[a]?.level] ?? 9;
+            const lb = levelOrder[lsb[b]?.level] ?? 9;
+            if (la !== lb) return la - lb;
+            return a.localeCompare(b);
+        });
+
+        // 최대값 계산 (바 비율용)
+        let maxTotal = 0;
+        sorted.forEach(ls => {
+            const t = (lsb[ls]['2단지'] || 0) + (lsb[ls]['10단지'] || 0);
+            if (t > maxTotal) maxTotal = t;
+        });
+
+        let currentLevel = '';
+        html += `
+        <div class="stats-section">
+            <h4 class="stats-section-title">
+                <span class="material-symbols-outlined">class</span>레벨기호별
+                <span class="stats-legend">
+                    <span class="stats-legend-dot" style="background:#4285f4"></span>2단지
+                    <span class="stats-legend-dot" style="background:#fbbc04"></span>10단지
+                </span>
+            </h4>
+            <div class="stats-bar-list">`;
+
+        sorted.forEach(ls => {
+            const info = lsb[ls];
+            const lv = info.level || '';
+            const cnt2 = info['2단지'] || 0;
+            const cnt10 = info['10단지'] || 0;
+            const total = cnt2 + cnt10;
+            const pct2 = maxTotal ? (cnt2 / maxTotal) * 100 : 0;
+            const pct10 = maxTotal ? (cnt10 / maxTotal) * 100 : 0;
+
+            // 학부 구분선
+            if (lv && lv !== currentLevel) {
+                currentLevel = lv;
+                html += `<div class="stats-bar-divider">${esc(lv)}</div>`;
+            }
+
+            html += `
+            <div class="stats-bar-item">
+                <span class="stats-bar-label">${esc(ls)}</span>
+                <div class="stats-bar-track">
+                    <div class="stats-bar-fill stats-bar-stack" style="width:${pct2}%;background:#4285f4"></div><div class="stats-bar-fill stats-bar-stack" style="width:${pct10}%;background:#fbbc04"></div>
+                </div>
+                <span class="stats-bar-value">${cnt2}+${cnt10}=${total}</span>
+            </div>`;
+        });
+
+        html += `</div></div>`;
+    }
+
+    container.innerHTML = html;
+}
+
+// ---------------------------------------------------------------------------
+// 패널 리사이저 (드래그로 목록/상세 크기 조절)
+// ---------------------------------------------------------------------------
+(() => {
+    const resizer = document.getElementById('panel-resizer');
+    const detailPanel = document.querySelector('.detail-panel');
+    if (!resizer || !detailPanel) return;
+
+    let startX, startWidth;
+
+    resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        startX = e.clientX;
+        startWidth = detailPanel.offsetWidth;
+        resizer.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        const onMouseMove = (e) => {
+            const diff = startX - e.clientX;
+            const newWidth = Math.max(280, Math.min(800, startWidth + diff));
+            detailPanel.style.width = newWidth + 'px';
+        };
+
+        const onMouseUp = () => {
+            resizer.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+        };
+
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    });
+})();
