@@ -14,7 +14,7 @@
  *   node upsert-students.js --dry-run           # preview only
  *   node upsert-students.js --file new_data.csv # custom CSV file
  *
- * docId: 이름_부모연락처숫자_branch
+ * docId: 이름_부모연락처숫자
  */
 
 import admin from 'firebase-admin';
@@ -91,9 +91,15 @@ function branchFromClassNumber(num) {
     return '';
 }
 
-function makeDocId(name, phone, branch) {
+function makeDocId(name, phone) {
     let p = (phone || '').replace(/\D/g, '');
     // 한국 전화번호 정규화: 010XXXXXXXX → 10XXXXXXXX (기존 데이터 형식에 맞춤)
+    if (p.length === 11 && p.startsWith('0')) p = p.slice(1);
+    return `${name}_${p}`.replace(/\s+/g, '_');
+}
+
+function makeOldDocId(name, phone, branch) {
+    let p = (phone || '').replace(/\D/g, '');
     if (p.length === 11 && p.startsWith('0')) p = p.slice(1);
     return `${name}_${p}_${branch}`.replace(/\s+/g, '_');
 }
@@ -214,7 +220,7 @@ async function upsertStudents() {
 
         const classNumber = raw['레벨기호'] || '';
         const branch = raw['branch'] || branchFromClassNumber(classNumber);
-        const docId = makeDocId(name, parentPhone, branch);
+        const docId = makeDocId(name, parentPhone);
 
         const dayRaw = raw['요일'] || '';
         const dayArr = dayRaw.split(/[,\s]+/)
@@ -265,7 +271,9 @@ async function upsertStudents() {
     const logEntries = []; // history_log records
 
     for (const [docId, incoming] of entries) {
-        const ex = existing[docId];
+        const oldDocId = makeOldDocId(incoming.name, incoming.parent_phone_1, incoming.branch);
+        const ex = existing[docId] || existing[oldDocId];
+        const foundViaOldId = !existing[docId] && existing[oldDocId];
 
         if (!ex) {
             // ── INSERT: new student ──
@@ -288,7 +296,7 @@ async function upsertStudents() {
 
             const hasInfoChange = Object.keys(infoDiff).length > 0;
 
-            if (!hasInfoChange && !enrollChanged) {
+            if (!hasInfoChange && !enrollChanged && !foundViaOldId) {
                 results.skipped.push(docId);
                 continue;
             }
@@ -301,8 +309,15 @@ async function upsertStudents() {
                 updateData.enrollments = incoming.enrollments;
             }
 
-            results.updated.push({ docId, infoDiff, oldCodes, newCodes, enrollChanged });
-            writes.push({ docId, data: updateData, type: 'merge' });
+            // If found via old docId, delete old and create new
+            if (foundViaOldId) {
+                writes.push({ docId: oldDocId, data: null, type: 'delete' });
+                writes.push({ docId, data: { ...ex, ...updateData }, type: 'set' });
+            } else {
+                writes.push({ docId, data: updateData, type: 'merge' });
+            }
+
+            results.updated.push({ docId, infoDiff, oldCodes, newCodes, enrollChanged, foundViaOldId, oldDocId });
 
             const beforeParts = [];
             const afterParts = [];
@@ -372,7 +387,9 @@ async function upsertStudents() {
 
         for (const w of chunk) {
             const ref = db.collection('students').doc(w.docId);
-            if (w.type === 'set') {
+            if (w.type === 'delete') {
+                batch.delete(ref);
+            } else if (w.type === 'set') {
                 batch.set(ref, w.data);
             } else {
                 batch.set(ref, w.data, { merge: true });

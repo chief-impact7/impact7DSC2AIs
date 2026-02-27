@@ -2,7 +2,7 @@
  * import-students.js
  * CSV → Firestore `students` 컬렉션 일괄 업로드 (enrollments[] 모델)
  *
- * docId: 이름_부모연락처숫자_branch
+ * docId: 이름_부모연락처숫자
  * 같은 학생의 여러 CSV 행 → enrollments[] 배열로 병합
  *
  * Run: node import-students.js
@@ -66,10 +66,10 @@ function branchFromClassNumber(num) {
     return '';
 }
 
-// --- docId: 이름_부모연락처숫자_branch ---
-function makeDocId(name, phone, branch) {
+// --- docId: 이름_부모연락처숫자 ---
+function makeDocId(name, phone) {
     const p = normalizePhone(phone);
-    return `${name}_${p}_${branch}`.replace(/\s+/g, '_');
+    return `${name}_${p}`.replace(/\s+/g, '_');
 }
 
 // --- CSV 파싱 ---
@@ -123,7 +123,7 @@ async function importStudents() {
 
         const classNumber = raw['레벨기호'] || '';   // CSV '레벨기호' = class_number
         const branch = raw['branch'] || branchFromClassNumber(classNumber);
-        const docId = makeDocId(name, parentPhone, branch);
+        const docId = makeDocId(name, parentPhone);
 
         // 요일: "월요일" → ["월"], "월,수" → ["월","수"]
         const dayRaw = raw['요일'] || '';

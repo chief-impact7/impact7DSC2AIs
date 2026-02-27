@@ -49,14 +49,15 @@ function normalizePhone(raw) {
 
 const badDocId = docs.filter(d => {
     const phone = normalizePhone(d.parent_phone_1);
-    const expected = `${d.name || ''}_${phone}_${d.branch || ''}`.replace(/\s+/g, '_');
-    return d.docId !== expected;
+    const newFormat = `${d.name || ''}_${phone}`.replace(/\s+/g, '_');
+    const oldFormat = `${d.name || ''}_${phone}_${d.branch || ''}`.replace(/\s+/g, '_');
+    return d.docId !== newFormat && d.docId !== oldFormat;
 });
 
 console.log(`\n▶ docId 형식 불일치: ${badDocId.length}건`);
 badDocId.slice(0, 10).forEach(d => {
     const phone = normalizePhone(d.parent_phone_1);
-    const expected = `${d.name}_${phone}_${d.branch}`.replace(/\s+/g, '_');
+    const expected = `${d.name}_${phone}`.replace(/\s+/g, '_');
     console.log(`  실제: "${d.docId}" ≠ 예상: "${expected}"`);
 });
 if (badDocId.length > 10) console.log(`  ... 외 ${badDocId.length - 10}건`);

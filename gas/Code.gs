@@ -352,8 +352,11 @@ function importFromSheet() {
     var branch = rowObj['소속'] || branchFromClassNumber(classNumber);
     var phone = parentPhone.replace(/\D/g, '');
     if (phone.length === 11 && phone.charAt(0) === '0') phone = phone.substring(1);
-    var docId = name + '_' + phone + '_' + branch;
+    var docId = name + '_' + phone;
     docId = docId.replace(/\s+/g, '_');
+    // Old-format docId for migration
+    var oldDocId = name + '_' + phone + '_' + branch;
+    oldDocId = oldDocId.replace(/\s+/g, '_');
 
     // 요일 파싱
     var dayStr = rowObj['요일'] || '';
@@ -382,7 +385,8 @@ function importFromSheet() {
         status: rowObj['상태'] || '재원',
         pause_start_date: formatDateValue(rowObj['휴원시작일']),
         pause_end_date: formatDateValue(rowObj['휴원종료일']),
-        enrollments: []
+        enrollments: [],
+        _oldDocId: oldDocId
       };
     }
     // 수업 관련 필드가 모두 비어있으면 enrollment 스킵
@@ -398,7 +402,21 @@ function importFromSheet() {
   for (var k = 0; k < docIds.length; k++) {
     var did = docIds[k];
     var student = studentMap[did];
+    var oldId = student._oldDocId;
+    delete student._oldDocId;
     try {
+      // Check if old-format doc exists and migrate
+      if (oldId && oldId !== did) {
+        try {
+          var oldUrl = getFirestoreBase_() + '/students/' + encodeURIComponent(oldId);
+          var oldResp = UrlFetchApp.fetch(oldUrl, { method: 'get', headers: authHeaders_(), muteHttpExceptions: true });
+          if (oldResp.getResponseCode() === 200) {
+            // Delete old-format doc
+            UrlFetchApp.fetch(oldUrl, { method: 'delete', headers: authHeaders_(), muteHttpExceptions: true });
+          }
+        } catch (ignored) {}
+      }
+
       upsertDocument_('students', did, student);
 
       // history_logs 기록
@@ -709,10 +727,10 @@ function auditData() {
   docs.forEach(function(d) {
     var phone = (d.parent_phone_1 || '').replace(/\D/g, '');
     if (phone.length === 11 && phone.charAt(0) === '0') phone = phone.substring(1);
-    var expected = (d.name || '') + '_' + phone + '_' + (d.branch || '');
-    expected = expected.replace(/\s+/g, '_');
-    if (d._docId !== expected) {
-      badDocId.push('실제: ' + d._docId + ' ≠ 예상: ' + expected);
+    var newFormat = ((d.name || '') + '_' + phone).replace(/\s+/g, '_');
+    var oldFormat = ((d.name || '') + '_' + phone + '_' + (d.branch || '')).replace(/\s+/g, '_');
+    if (d._docId !== newFormat && d._docId !== oldFormat) {
+      badDocId.push('실제: ' + d._docId + ' ≠ 예상: ' + newFormat);
     }
   });
   report.push('▶ docId 형식 불일치: ' + badDocId.length + '건');
@@ -858,8 +876,11 @@ function importFromSheetById(sheetId) {
     var branch = rowObj['소속'] || branchFromClassNumber(classNumber);
     var phone = parentPhone.replace(/\D/g, '');
     if (phone.length === 11 && phone.charAt(0) === '0') phone = phone.substring(1);
-    var docId = name + '_' + phone + '_' + branch;
+    var docId = name + '_' + phone;
     docId = docId.replace(/\s+/g, '_');
+    // Old-format docId for migration
+    var oldDocId = name + '_' + phone + '_' + branch;
+    oldDocId = oldDocId.replace(/\s+/g, '_');
 
     var dayStr = rowObj['요일'] || '';
     var dayArr = dayStr.split(/[,\s]+/).filter(function(d) { return d; });
@@ -887,7 +908,8 @@ function importFromSheetById(sheetId) {
         status: rowObj['상태'] || '재원',
         pause_start_date: formatDateValue(rowObj['휴원시작일']),
         pause_end_date: formatDateValue(rowObj['휴원종료일']),
-        enrollments: []
+        enrollments: [],
+        _oldDocId: oldDocId
       };
     }
     var hasEnrollData = enrollment.level_symbol || enrollment.class_number ||
@@ -902,7 +924,21 @@ function importFromSheetById(sheetId) {
   for (var k = 0; k < docIds.length; k++) {
     var did = docIds[k];
     var student = studentMap[did];
+    var oldId = student._oldDocId;
+    delete student._oldDocId;
     try {
+      // Check if old-format doc exists and migrate
+      if (oldId && oldId !== did) {
+        try {
+          var oldUrl = getFirestoreBase_() + '/students/' + encodeURIComponent(oldId);
+          var oldResp = UrlFetchApp.fetch(oldUrl, { method: 'get', headers: authHeaders_(), muteHttpExceptions: true });
+          if (oldResp.getResponseCode() === 200) {
+            // Delete old-format doc
+            UrlFetchApp.fetch(oldUrl, { method: 'delete', headers: authHeaders_(), muteHttpExceptions: true });
+          }
+        } catch (ignored) {}
+      }
+
       upsertDocument_('students', did, student);
 
       var enrollCodes = student.enrollments.map(function(e) {

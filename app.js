@@ -63,6 +63,17 @@ const branchFromClassNumber = (num) => {
 // 학생의 소속: branch 필드 우선, 없으면 첫 번째 enrollment의 class_number에서 파생
 const branchFromStudent = (s) => s.branch || (s.enrollments?.[0] ? branchFromClassNumber(s.enrollments[0].class_number) : '');
 
+// 학생의 모든 소속 지점 (여러 enrollment에서 파생된 지점 합집합)
+const branchesFromStudent = (s) => {
+    const set = new Set();
+    (s.enrollments || []).forEach(e => {
+        const b = branchFromClassNumber(e.class_number);
+        if (b) set.add(b);
+    });
+    if (set.size === 0 && s.branch) set.add(s.branch);
+    return [...set];
+};
+
 // 모든 enrollment의 요일 합집합
 const combinedDays = (s) => [...new Set((s.enrollments || []).flatMap(e => normalizeDays(e.day)))];
 
@@ -312,12 +323,12 @@ async function generateDailyStatsIfNeeded() {
             byStatus[st] = (byStatus[st] || 0) + 1;
             if (st !== '퇴원') activeTotal++;
 
-            const br = branchFromStudent(s);
-            if (br) {
+            const branches = branchesFromStudent(s);
+            branches.forEach(br => {
                 byBranch[br] = (byBranch[br] || 0) + 1;
                 if (!byStatusBranch[br]) byStatusBranch[br] = {};
                 byStatusBranch[br][st] = (byStatusBranch[br][st] || 0) + 1;
-            }
+            });
 
             const lv = s.level || '';
             if (lv) byLevel[lv] = (byLevel[lv] || 0) + 1;
@@ -326,9 +337,10 @@ async function generateDailyStatsIfNeeded() {
                 const code = enrollmentCode(e);
                 if (code) byClassCode[code] = (byClassCode[code] || 0) + 1;
                 const ls = e.level_symbol || '';
+                const eBranch = branchFromClassNumber(e.class_number);
                 if (ls) {
                     if (!byLevelSymbolBranch[ls]) byLevelSymbolBranch[ls] = { level: lv };
-                    if (br) byLevelSymbolBranch[ls][br] = (byLevelSymbolBranch[ls][br] || 0) + 1;
+                    if (eBranch) byLevelSymbolBranch[ls][eBranch] = (byLevelSymbolBranch[ls][eBranch] || 0) + 1;
                 }
             });
         });
@@ -465,7 +477,7 @@ function buildClassFilterSidebar() {
     // branch 필터가 활성화되어 있으면 해당 branch 학생만 대상
     let targetStudents = allStudents;
     if (activeFilters.branch) {
-        targetStudents = allStudents.filter(s => branchFromStudent(s) === activeFilters.branch);
+        targetStudents = allStudents.filter(s => branchesFromStudent(s).includes(activeFilters.branch));
     }
 
     const codeCount = {};
@@ -527,7 +539,7 @@ function applyFilterAndRender() {
 
     // 각 타입별로 AND 조건 적용
     if (activeFilters.level) filtered = filtered.filter(s => s.level === activeFilters.level);
-    if (activeFilters.branch) filtered = filtered.filter(s => branchFromStudent(s) === activeFilters.branch);
+    if (activeFilters.branch) filtered = filtered.filter(s => branchesFromStudent(s).includes(activeFilters.branch));
     if (activeFilters.day) filtered = filtered.filter(s => combinedDays(s).includes(activeFilters.day));
     if (activeFilters.status) filtered = filtered.filter(s => s.status === activeFilters.status);
     if (activeFilters.class_type) filtered = filtered.filter(s => (s.enrollments || []).some(e => e.class_type === activeFilters.class_type));
@@ -626,7 +638,7 @@ function renderStudentItem(s, container) {
     const div = document.createElement('div');
     div.className = 'list-item' + (bulkMode ? ' bulk-mode' : '') + (selectedStudentIds.has(s.id) ? ' bulk-selected' : '');
     div.dataset.id = s.id;
-    const branch = branchFromStudent(s);
+    const branch = branchesFromStudent(s).join(', ') || branchFromStudent(s);
     const schoolShort = abbreviateSchool(s);
     const subLine = [branch, schoolShort !== '—' ? schoolShort : ''].filter(Boolean).join(' · ');
     const tags = allClassCodes(s).map(c => `<span class="item-tag">${esc(c)}</span>`).join('') || '<span class="item-tag">—</span>';
@@ -702,15 +714,19 @@ function renderStudentItem(s, container) {
 function renderGroupedList(students, container) {
     const groups = {};
     students.forEach(s => {
-        let key;
         if (groupViewMode === 'branch') {
-            key = branchFromStudent(s) || '미지정';
+            const branches = branchesFromStudent(s);
+            const keys = branches.length > 0 ? branches : ['미지정'];
+            keys.forEach(key => {
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(s);
+            });
         } else {
             const codes = allClassCodes(s);
-            key = codes.length ? codes[0] : '미지정';
+            const key = codes.length ? codes[0] : '미지정';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(s);
         }
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(s);
     });
 
     // 그룹 키 정렬
@@ -837,7 +853,7 @@ window.selectStudent = (studentId, studentData, targetElement) => {
 
     document.getElementById('profile-initial').textContent = studentData.name?.[0] || 'S';
     document.getElementById('profile-name').textContent = studentData.name || studentId;
-    const branch = branchFromStudent(studentData);
+    const branch = branchesFromStudent(studentData).join(', ') || branchFromStudent(studentData);
     const schoolShort = abbreviateSchool(studentData);
     document.getElementById('profile-school').textContent = branch && schoolShort !== '—'
         ? `${branch} · ${schoolShort}`
@@ -884,11 +900,11 @@ window.selectStudent = (studentId, studentData, targetElement) => {
 // ---------------------------------------------------------------------------
 // docId generator (import-students.js와 동일한 방식)
 // ---------------------------------------------------------------------------
-const makeDocId = (name, parentPhone, branch) => {
+const makeDocId = (name, parentPhone) => {
     let phone = (parentPhone || '').replace(/\D/g, '');
     // 한국 전화번호 정규화: 010XXXXXXXX → 10XXXXXXXX (기존 데이터 형식에 맞춤)
     if (phone.length === 11 && phone.startsWith('0')) phone = phone.slice(1);
-    return `${name}_${phone}_${branch}`.replace(/\s+/g, '_');
+    return `${name}_${phone}`.replace(/\s+/g, '_');
 };
 
 // ---------------------------------------------------------------------------
@@ -1130,18 +1146,32 @@ window.submitNewStudent = async () => {
                 timestamp: serverTimestamp(),
             });
         } else {
-            const branch = studentData.branch;
-            const docId = makeDocId(name, parentPhone1, branch);
-            await setDoc(doc(db, 'students', docId), studentData);
-            const codes = allClassCodes(studentData).join(', ') || '—';
-            await addDoc(collection(db, 'history_logs'), {
-                doc_id: docId,
-                change_type: 'ENROLL',
-                before: '—',
-                after: `신규 등록: ${name} (${codes})`,
-                google_login_id: currentUser?.email || 'system',
-                timestamp: serverTimestamp(),
-            });
+            const docId = makeDocId(name, parentPhone1);
+            const existingStudent = allStudents.find(s => s.id === docId);
+            if (existingStudent) {
+                // Student exists — add new enrollments to existing doc
+                const mergedEnrollments = [...(existingStudent.enrollments || []), ...allEnrollments];
+                await setDoc(doc(db, 'students', docId), { enrollments: mergedEnrollments }, { merge: true });
+                await addDoc(collection(db, 'history_logs'), {
+                    doc_id: docId,
+                    change_type: 'UPDATE',
+                    before: `수업: ${allClassCodes(existingStudent).join(', ') || '—'}`,
+                    after: `수업 추가: ${allEnrollments.map(e => enrollmentCode(e)).join(', ')}`,
+                    google_login_id: currentUser?.email || 'system',
+                    timestamp: serverTimestamp(),
+                });
+            } else {
+                await setDoc(doc(db, 'students', docId), studentData);
+                const codes = allClassCodes(studentData).join(', ') || '—';
+                await addDoc(collection(db, 'history_logs'), {
+                    doc_id: docId,
+                    change_type: 'ENROLL',
+                    before: '—',
+                    after: `신규 등록: ${name} (${codes})`,
+                    google_login_id: currentUser?.email || 'system',
+                    timestamp: serverTimestamp(),
+                });
+            }
             currentStudentId = docId;
         }
 
@@ -1981,7 +2011,7 @@ async function runUpsertFromRows(rows, sourceName) {
 
         const classNumber = raw['class_number'] || '';
         const branch = raw['branch'] || branchFromClassNumber(classNumber);
-        const docId = makeDocId(name, parentPhone, branch);
+        const docId = makeDocId(name, parentPhone);
 
         const dayRaw = raw['요일'] || '';
         const dayArr = dayRaw.split(/[,\s]+/).map(d => d.replace(/요일$/, '')).filter(d => d);

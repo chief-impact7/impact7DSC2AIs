@@ -33,11 +33,12 @@ function normalizePhone(raw) {
     return p;
 }
 
-// 삭제 대상: docId가 예상 형식(이름_전화번호_branch)과 다른 문서
+// 삭제 대상: docId가 예상 형식(이름_전화번호 또는 이름_전화번호_branch)과 다른 문서
 const toDelete = allDocs.filter(d => {
     const phone = normalizePhone(d.parent_phone_1);
-    const expected = `${d.name || ''}_${phone}_${d.branch || ''}`.replace(/\s+/g, '_');
-    return d.docId !== expected;
+    const newFormat = `${d.name || ''}_${phone}`.replace(/\s+/g, '_');
+    const oldFormat = `${d.name || ''}_${phone}_${d.branch || ''}`.replace(/\s+/g, '_');
+    return d.docId !== newFormat && d.docId !== oldFormat;
 });
 
 console.log(`삭제 대상: ${toDelete.length}개 (잘못된 docId 문서)`);
@@ -51,7 +52,7 @@ if (toDelete.length === 0) {
 // 삭제 전 목록 출력
 toDelete.slice(0, 10).forEach(d => {
     const phone = normalizePhone(d.parent_phone_1);
-    const expected = `${d.name}_${phone}_${d.branch}`.replace(/\s+/g, '_');
+    const expected = `${d.name}_${phone}`.replace(/\s+/g, '_');
     console.log(`  삭제: "${d.docId}" (예상: "${expected}")`);
 });
 if (toDelete.length > 10) console.log(`  ... 외 ${toDelete.length - 10}건`);
