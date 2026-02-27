@@ -17,6 +17,34 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// --- RFC 4180 compliant CSV line parser ---
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+            if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+            else if (ch === '"') { inQuotes = false; }
+            else { current += ch; }
+        } else {
+            if (ch === '"') { inQuotes = true; }
+            else if (ch === ',') { result.push(current.trim()); current = ''; }
+            else { current += ch; }
+        }
+    }
+    result.push(current.trim());
+    return result;
+}
+
+// --- 전화번호 정규화: 010XXXXXXXX → 10XXXXXXXX ---
+function normalizePhone(raw) {
+    let p = (raw || '').replace(/\D/g, '');
+    if (p.length === 11 && p.startsWith('0')) p = p.slice(1);
+    return p;
+}
+
 // --- Firebase init (환경변수에서 읽기: node --env-file=.env import-students.js) ---
 const firebaseConfig = {
     apiKey:            process.env.VITE_FIREBASE_API_KEY,
@@ -40,7 +68,7 @@ function branchFromClassNumber(num) {
 
 // --- docId: 이름_부모연락처숫자_branch ---
 function makeDocId(name, phone, branch) {
-    const p = (phone || '').replace(/\D/g, '');
+    const p = normalizePhone(phone);
     return `${name}_${p}_${branch}`.replace(/\s+/g, '_');
 }
 
@@ -52,7 +80,7 @@ async function parseCSV(filePath) {
 
     for await (const line of rl) {
         if (!line.trim()) continue;
-        const values = line.split(',');
+        const values = parseCSVLine(line);
         if (!headers) {
             headers = values.map(h => h.trim());
         } else {

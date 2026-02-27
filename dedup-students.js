@@ -26,9 +26,16 @@ const allDocs = snapshot.docs.map(d => ({ docId: d.id, ref: d.ref, ...d.data() }
 
 console.log(`총 문서 수: ${allDocs.length}`);
 
+// 전화번호 정규화: 010XXXXXXXX → 10XXXXXXXX
+function normalizePhone(raw) {
+    let p = (raw || '').replace(/\D/g, '');
+    if (p.length === 11 && p.startsWith('0')) p = p.slice(1);
+    return p;
+}
+
 // 삭제 대상: docId가 예상 형식(이름_전화번호_branch)과 다른 문서
 const toDelete = allDocs.filter(d => {
-    const phone = (d.parent_phone_1 || '').replace(/\D/g, '');
+    const phone = normalizePhone(d.parent_phone_1);
     const expected = `${d.name || ''}_${phone}_${d.branch || ''}`.replace(/\s+/g, '_');
     return d.docId !== expected;
 });
@@ -43,7 +50,7 @@ if (toDelete.length === 0) {
 
 // 삭제 전 목록 출력
 toDelete.slice(0, 10).forEach(d => {
-    const phone = (d.parent_phone_1 || '').replace(/\D/g, '');
+    const phone = normalizePhone(d.parent_phone_1);
     const expected = `${d.name}_${phone}_${d.branch}`.replace(/\s+/g, '_');
     console.log(`  삭제: "${d.docId}" (예상: "${expected}")`);
 });

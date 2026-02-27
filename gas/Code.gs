@@ -351,6 +351,7 @@ function importFromSheet() {
     var classNumber = rowObj['반넘버'] || '';
     var branch = rowObj['소속'] || branchFromClassNumber(classNumber);
     var phone = parentPhone.replace(/\D/g, '');
+    if (phone.length === 11 && phone.charAt(0) === '0') phone = phone.substring(1);
     var docId = name + '_' + phone + '_' + branch;
     docId = docId.replace(/\s+/g, '_');
 
@@ -707,6 +708,7 @@ function auditData() {
   var badDocId = [];
   docs.forEach(function(d) {
     var phone = (d.parent_phone_1 || '').replace(/\D/g, '');
+    if (phone.length === 11 && phone.charAt(0) === '0') phone = phone.substring(1);
     var expected = (d.name || '') + '_' + phone + '_' + (d.branch || '');
     expected = expected.replace(/\s+/g, '_');
     if (d._docId !== expected) {
@@ -855,6 +857,7 @@ function importFromSheetById(sheetId) {
     var classNumber = rowObj['반넘버'] || '';
     var branch = rowObj['소속'] || branchFromClassNumber(classNumber);
     var phone = parentPhone.replace(/\D/g, '');
+    if (phone.length === 11 && phone.charAt(0) === '0') phone = phone.substring(1);
     var docId = name + '_' + phone + '_' + branch;
     docId = docId.replace(/\s+/g, '_');
 

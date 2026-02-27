@@ -2144,3 +2144,74 @@ summary.menu-l2 .material-symbols-outlined {
     display: inline-block;
 }
 
+/* ===== Responsive Design ===== */
+
+/* Tablet: hide sidebar, list and detail split evenly */
+@media (max-width: 1024px) {
+    .sidebar {
+        display: none;
+    }
+    .main-content {
+        border-radius: 0;
+        margin-top: 0;
+    }
+    .list-panel {
+        min-width: unset;
+        flex: 1;
+    }
+    .detail-panel {
+        flex: 1;
+        width: auto;
+    }
+}
+
+/* Mobile: single column, detail as overlay */
+@media (max-width: 768px) {
+    .container {
+        flex-direction: column;
+    }
+    .sidebar {
+        display: none;
+    }
+    .main-content {
+        flex-direction: column;
+        border-radius: 0;
+        margin-top: 0;
+    }
+    .list-panel {
+        min-width: unset;
+        width: 100%;
+        flex: 1;
+        border-right: none;
+    }
+    .detail-panel {
+        display: none;
+        width: 100%;
+    }
+    .detail-panel.active {
+        display: flex;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 100;
+        background: var(--surface-container, #fff);
+        overflow-y: auto;
+    }
+    .panel-resizer {
+        display: none;
+    }
+    .app-bar {
+        padding: 0 8px;
+    }
+    .app-bar-left .logo .title {
+        font-size: 16px;
+    }
+    .search-box {
+        max-width: none;
+        flex: 1;
+        margin-right: 8px;
+    }
+}
+

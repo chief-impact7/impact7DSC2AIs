@@ -1,7 +1,28 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, getDocs, getDoc, doc, setDoc, addDoc, deleteDoc, serverTimestamp, query, where, orderBy, writeBatch } from 'firebase/firestore';
+import { collection, collectionGroup, getDocs, getDoc, doc, setDoc, addDoc, deleteDoc, serverTimestamp, query, where, orderBy, writeBatch } from 'firebase/firestore';
 import { auth, db } from './firebase-config.js';
 import { signInWithGoogle, logout, getGoogleAccessToken } from './auth.js';
+
+// --- RFC 4180 compliant CSV line parser ---
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+            if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+            else if (ch === '"') { inQuotes = false; }
+            else { current += ch; }
+        } else {
+            if (ch === '"') { inQuotes = true; }
+            else if (ch === ',') { result.push(current.trim()); current = ''; }
+            else { current += ch; }
+        }
+    }
+    result.push(current.trim());
+    return result;
+}
 
 let currentUser = null;
 let currentUserRole = null; // 'admin' | 'teacher' | null
@@ -362,13 +383,13 @@ async function loadMemoCacheAndRender() {
     memoCache = {};
     // 먼저 목록을 바로 렌더
     applyFilterAndRender();
-    // 백그라운드에서 메모 존재 여부 확인 후 아이콘 업데이트
+    // 백그라운드에서 메모 존재 여부 확인 후 아이콘 업데이트 (collectionGroup으로 1회 쿼리)
     try {
-        const checks = allStudents.map(async (s) => {
-            const snap = await getDocs(collection(db, 'students', s.id, 'memos'));
-            if (!snap.empty) memoCache[s.id] = true;
+        const memoSnap = await getDocs(collectionGroup(db, 'memos'));
+        memoSnap.forEach(d => {
+            const parentId = d.ref.parent.parent.id;
+            memoCache[parentId] = true;
         });
-        await Promise.all(checks);
         // 메모 아이콘 업데이트를 위해 다시 렌더
         applyFilterAndRender();
     } catch (e) {
@@ -1914,9 +1935,9 @@ async function runCsvUpsert(csvText, fileName) {
     const lines = csvText.split(/\r?\n/).filter(l => l.trim());
     if (lines.length < 2) { alert('CSV에 데이터가 없습니다.'); return; }
 
-    const headers = lines[0].split(',').map(h => h.trim());
+    const headers = parseCSVLine(lines[0]);
     const rows = lines.slice(1).map(line => {
-        const vals = line.split(',');
+        const vals = parseCSVLine(line);
         const obj = {};
         headers.forEach((h, i) => { obj[h] = (vals[i] || '').trim(); });
         return obj;
@@ -2716,7 +2737,7 @@ window.bulkDelete = () => {
     if (listEl) {
         listEl.innerHTML = ids.map(id => {
             const s = allStudents.find(s => s.id === id);
-            return `<div class="bulk-delete-item"><span>${esc(s?.name || id)}</span><span style="font-size:12px;color:var(--text-sec);">${allClassCodes(s || {}).join(', ') || '—'}</span></div>`;
+            return `<div class="bulk-delete-item"><span>${esc(s?.name || id)}</span><span style="font-size:12px;color:var(--text-sec);">${esc(allClassCodes(s || {}).join(', ') || '—')}</span></div>`;
         }).join('');
     }
     document.getElementById('bulk-delete-modal').style.display = 'flex';

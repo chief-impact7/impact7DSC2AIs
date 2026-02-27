@@ -18,13 +18,33 @@
  */
 
 import admin from 'firebase-admin';
-import { createReadStream, readFileSync, writeFileSync } from 'fs';
+import { createReadStream, readFileSync } from 'fs';
 import { createInterface } from 'readline';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { tmpdir } from 'os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// --- RFC 4180 compliant CSV line parser ---
+function parseCSVLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+            if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+            else if (ch === '"') { inQuotes = false; }
+            else { current += ch; }
+        } else {
+            if (ch === '"') { inQuotes = true; }
+            else if (ch === ',') { result.push(current.trim()); current = ''; }
+            else { current += ch; }
+        }
+    }
+    result.push(current.trim());
+    return result;
+}
 
 // --- CLI args ---
 const args = process.argv.slice(2);
@@ -35,7 +55,7 @@ const csvFileName = fileIdx !== -1 && args[fileIdx + 1] ? args[fileIdx + 1] : 's
 if (DRY_RUN) console.log('🔍 DRY RUN 모드 — Firestore에 쓰지 않습니다.\n');
 
 // --- Firebase Admin init ---
-// Priority: 1) service-account.json  2) GOOGLE_APPLICATION_CREDENTIALS  3) CI token  4) Firebase CLI token
+// Priority: 1) service-account.json  2) GOOGLE_APPLICATION_CREDENTIALS env var
 function initFirebase() {
     // 1) Local service account key file
     const saPath = resolve(__dirname, 'service-account.json');
@@ -53,31 +73,9 @@ function initFirebase() {
         return;
     }
 
-    // 3) CI token (.firebase-ci-token file or FIREBASE_TOKEN env)
-    const ciTokenPaths = [
-        resolve(__dirname, '.firebase-ci-token'),
-    ];
-    const ciToken = process.env.FIREBASE_TOKEN
-        || ciTokenPaths.reduce((t, p) => { try { return readFileSync(p, 'utf8').trim(); } catch { return t; } }, '');
-
-    if (ciToken) {
-        const adcPayload = {
-            type: 'authorized_user',
-            client_id: '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com',
-            client_secret: 'j9iVZfS8kkCEFUPaAeJV0sAi',
-            refresh_token: ciToken,
-        };
-        const adcPath = resolve(tmpdir(), '.firebase-adc-tmp.json');
-        writeFileSync(adcPath, JSON.stringify(adcPayload));
-        process.env.GOOGLE_APPLICATION_CREDENTIALS = adcPath;
-        admin.initializeApp({ projectId: 'impact7db' });
-        console.log('Firebase Admin: CI 토큰으로 인증됨\n');
-        return;
-    }
-
-    console.error('❌ 인증 방법을 찾을 수 없습니다.');
-    console.error('   1) service-account.json 파일을 프로젝트 폴더에 넣거나');
-    console.error('   2) firebase login:ci 로 토큰 생성 후 .firebase-ci-token 에 저장');
+    console.error('Error: No Firebase credentials found. Please either:');
+    console.error('1. Place a service-account.json in the project root');
+    console.error('2. Set GOOGLE_APPLICATION_CREDENTIALS environment variable');
     process.exit(1);
 }
 
@@ -179,7 +177,7 @@ async function parseCSV(filePath) {
 
     for await (const line of rl) {
         if (!line.trim()) continue;
-        const values = line.split(',');
+        const values = parseCSVLine(line);
         if (!headers) {
             headers = values.map(h => h.trim());
         } else {

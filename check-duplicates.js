@@ -41,15 +41,21 @@ nameDups.forEach(([name, arr]) => {
 });
 
 // 2) docId 형식 점검 (이름_전화번호_branch)
+function normalizePhone(raw) {
+    let p = (raw || '').replace(/\D/g, '');
+    if (p.length === 11 && p.startsWith('0')) p = p.slice(1);
+    return p;
+}
+
 const badDocId = docs.filter(d => {
-    const phone = (d.parent_phone_1 || '').replace(/\D/g, '');
+    const phone = normalizePhone(d.parent_phone_1);
     const expected = `${d.name || ''}_${phone}_${d.branch || ''}`.replace(/\s+/g, '_');
     return d.docId !== expected;
 });
 
 console.log(`\n▶ docId 형식 불일치: ${badDocId.length}건`);
 badDocId.slice(0, 10).forEach(d => {
-    const phone = (d.parent_phone_1 || '').replace(/\D/g, '');
+    const phone = normalizePhone(d.parent_phone_1);
     const expected = `${d.name}_${phone}_${d.branch}`.replace(/\s+/g, '_');
     console.log(`  실제: "${d.docId}" ≠ 예상: "${expected}"`);
 });

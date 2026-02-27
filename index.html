@@ -17,7 +17,7 @@
 <body>
     <header class="app-bar">
         <div class="app-bar-left">
-            <span class="material-symbols-outlined icon-btn">menu</span>
+            <span class="material-symbols-outlined icon-btn" role="button" tabindex="0" aria-label="메뉴">menu</span>
             <div class="logo">
                 <span class="material-symbols-outlined text-primary" style="font-size:32px;">school</span>
                 <span class="title">impact7DB Dashboard</span>
@@ -25,13 +25,13 @@
         </div>
         <div class="app-bar-right">
             <div class="search-box">
-                <span class="material-symbols-outlined search-icon">search</span>
-                <input type="text" id="studentSearchInput" placeholder="이름, 학교, 전화번호 또는 초성(ㄱㄴㄷ)으로 검색..." />
+                <span class="material-symbols-outlined search-icon" role="button" tabindex="0" aria-label="검색">search</span>
+                <input type="text" id="studentSearchInput" placeholder="이름, 학교, 전화번호 또는 초성(ㄱㄴㄷ)으로 검색..." aria-label="학생 검색 (이름, 전화번호, 초성)" />
             </div>
-            <span class="material-symbols-outlined icon-btn" onclick="window.showGuide()" title="사용 가이드">help</span>
-            <span class="material-symbols-outlined icon-btn">settings</span>
-            <span class="material-symbols-outlined icon-btn">apps</span>
-            <div class="avatar icon-btn" onclick="handleLogin()">G</div>
+            <span class="material-symbols-outlined icon-btn" onclick="window.showGuide()" title="사용 가이드" role="button" tabindex="0" aria-label="도움말">help</span>
+            <span class="material-symbols-outlined icon-btn" role="button" tabindex="0" aria-label="설정">settings</span>
+            <span class="material-symbols-outlined icon-btn" role="button" tabindex="0" aria-label="앱 목록">apps</span>
+            <div class="avatar icon-btn" onclick="handleLogin()" role="button" tabindex="0" aria-label="로그인">G</div>
         </div>
     </header>
 
@@ -195,16 +195,16 @@
                 <div class="panel-header">
                     <span id="student-count" class="count-chip">—</span>
                     <span id="filter-chips" class="filter-chips"></span>
-                    <span id="filter-clear-btn" class="filter-clear-btn" onclick="window.clearFilters()" title="필터 초기화" style="display:none;">
+                    <span id="filter-clear-btn" class="filter-clear-btn" onclick="window.clearFilters()" title="필터 초기화" style="display:none;" role="button" tabindex="0" aria-label="닫기">
                         <span class="material-symbols-outlined" style="font-size:16px;">close</span>
                     </span>
                     <div class="actions">
-                        <span class="material-symbols-outlined icon-btn" id="group-view-btn" title="그룹 뷰 (반별)" onclick="window.toggleGroupView()">view_agenda</span>
-                        <span class="material-symbols-outlined icon-btn" title="데이터 업로드" onclick="window.handleUpload()">upload</span>
-                        <span class="material-symbols-outlined icon-btn" title="구글시트로 다운로드" onclick="window.handleSheetExport()">download</span>
+                        <span class="material-symbols-outlined icon-btn" id="group-view-btn" title="그룹 뷰 (반별)" onclick="window.toggleGroupView()" role="button" tabindex="0" aria-label="그룹 뷰">view_agenda</span>
+                        <span class="material-symbols-outlined icon-btn" title="데이터 업로드" onclick="window.handleUpload()" role="button" tabindex="0" aria-label="데이터 업로드">upload</span>
+                        <span class="material-symbols-outlined icon-btn" title="구글시트로 다운로드" onclick="window.handleSheetExport()" role="button" tabindex="0" aria-label="구글시트로 다운로드">download</span>
                         <span class="material-symbols-outlined icon-btn" title="Refresh"
-                            onclick="window.refreshStudents && window.refreshStudents()">refresh</span>
-                        <span class="material-symbols-outlined icon-btn" id="bulk-mode-btn" title="일괄 선택 모드" onclick="window.toggleBulkMode()">checklist</span>
+                            onclick="window.refreshStudents && window.refreshStudents()" role="button" tabindex="0" aria-label="새로고침">refresh</span>
+                        <span class="material-symbols-outlined icon-btn" id="bulk-mode-btn" title="일괄 선택 모드" onclick="window.toggleBulkMode()" role="button" tabindex="0" aria-label="일괄 선택 모드">checklist</span>
                     </div>
                 </div>
                 <!-- 일괄처리 액션 바 -->
@@ -214,7 +214,7 @@
                         <span id="bulk-selected-count">0명 선택</span>
                     </label>
                     <div class="bulk-actions">
-                        <button class="bulk-btn-close" onclick="window.exitBulkMode()" title="선택 해제">
+                        <button class="bulk-btn-close" onclick="window.exitBulkMode()" title="선택 해제" aria-label="닫기">
                             <span class="material-symbols-outlined">close</span>
                         </button>
                     </div>
@@ -324,11 +324,11 @@
 
                 <!-- 조회 모드 헤더 -->
                 <div class="panel-header" id="detail-header">
-                    <span class="material-symbols-outlined icon-btn" style="visibility:hidden">arrow_back</span>
+                    <span class="material-symbols-outlined icon-btn" style="visibility:hidden" role="button" tabindex="0" aria-label="뒤로가기">arrow_back</span>
                     <div class="actions">
                         <span class="material-symbols-outlined icon-btn" title="Edit"
-                            onclick="showEditForm()">edit</span>
-                        <span class="material-symbols-outlined icon-btn" title="Print">print</span>
+                            onclick="showEditForm()" role="button" tabindex="0" aria-label="수정">edit</span>
+                        <span class="material-symbols-outlined icon-btn" title="Print" role="button" tabindex="0" aria-label="인쇄">print</span>
                     </div>
                 </div>
                 <!-- 등록 폼 헤더 -->
@@ -621,22 +621,22 @@
         </main>
     </div>
     <!-- 메모 입력 모달 -->
-    <div id="memo-modal" class="modal-overlay" style="display:none" onclick="window.closeMemoModal(event)">
+    <div id="memo-modal" class="modal-overlay" style="display:none" onclick="window.closeMemoModal(event)" role="dialog" aria-modal="true" aria-label="메모 추가">
         <div class="modal-card">
             <h3 class="modal-title">
                 <span class="material-symbols-outlined">sticky_note_2</span>
                 메모 추가
             </h3>
-            <textarea id="memo-modal-input" class="modal-textarea" placeholder="메모 내용을 입력하세요..." rows="6"></textarea>
+            <textarea id="memo-modal-input" class="modal-textarea" placeholder="메모 내용을 입력하세요..." rows="6" aria-label="메모 내용"></textarea>
             <div class="modal-actions">
-                <button class="btn-cancel" onclick="window.closeMemoModal()">취소</button>
+                <button class="btn-cancel" onclick="window.closeMemoModal()" aria-label="닫기">취소</button>
                 <button class="btn-save" onclick="window.saveMemoFromModal()">저장</button>
             </div>
         </div>
     </div>
 
     <!-- 수업 추가 모달 -->
-    <div id="enrollment-modal" class="modal-overlay" style="display:none" onclick="window.closeEnrollmentModal(event)">
+    <div id="enrollment-modal" class="modal-overlay" style="display:none" onclick="window.closeEnrollmentModal(event)" role="dialog" aria-modal="true" aria-label="수업 추가">
         <div class="modal-card">
             <h3 class="modal-title">
                 <span class="material-symbols-outlined">add_circle</span>
@@ -687,14 +687,14 @@
                 </div>
             </form>
             <div class="modal-actions">
-                <button class="btn-cancel" onclick="window.closeEnrollmentModal()">취소</button>
+                <button class="btn-cancel" onclick="window.closeEnrollmentModal()" aria-label="닫기">취소</button>
                 <button class="btn-save" onclick="window.saveEnrollment()">추가</button>
             </div>
         </div>
     </div>
 
     <!-- 종강 확인 모달 -->
-    <div id="end-class-modal" class="modal-overlay" style="display:none" onclick="window.closeEndClassModal(event)">
+    <div id="end-class-modal" class="modal-overlay" style="display:none" onclick="window.closeEndClassModal(event)" role="dialog" aria-modal="true" aria-label="종강 처리">
         <div class="modal-card">
             <h3 class="modal-title" id="end-class-title">
                 <span class="material-symbols-outlined" style="color:#ea4335;">school</span>
@@ -702,7 +702,7 @@
             </h3>
             <div id="end-class-body" class="end-class-body"></div>
             <div class="modal-actions end-class-actions">
-                <button class="btn-cancel" onclick="window.closeEndClassModal()">취소</button>
+                <button class="btn-cancel" onclick="window.closeEndClassModal()" aria-label="닫기">취소</button>
                 <button class="btn-end-class-confirm btn-end-single" id="end-class-single-btn" onclick="window.confirmEndClassSingle()">해당 학생만</button>
                 <button class="btn-end-class-confirm" id="end-class-confirm-btn" onclick="window.confirmEndClass()">전체 종강처리</button>
             </div>
