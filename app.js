@@ -26,11 +26,11 @@ function parseCSVLine(line) {
 
 // 학부별 학기 이름 목록
 const SEMESTER_NAMES = {
-    '초등': ['겨울', '봄1', '봄2', '여름', '가을'],
-    '중등': ['겨울', '봄', '여름', '가을'],
-    '고등': ['겨울', '봄', '가을'],
+    '초등': ['Winter', 'Spring1', 'Spring2', 'Summer', 'Autumn'],
+    '중등': ['Winter', 'Spring', 'Summer', 'Autumn'],
+    '고등': ['Winter', 'Spring', 'Autumn'],
 };
-const DEFAULT_SEMESTER_NAMES = ['겨울', '봄', '여름', '가을'];
+const DEFAULT_SEMESTER_NAMES = ['Winter', 'Spring', 'Summer', 'Autumn'];
 
 // 학부 + 연도 기준으로 <option> 문자열 생성 (현재 연도 + 다음 연도)
 function getSemesterOptions(level, selectedSemester) {
