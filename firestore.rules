@@ -4,7 +4,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // =========================================================================
-    // 인증: 로그인 여부만 확인 (도메인 검증은 클라이언트 + 아래 개별 규칙에서)
+    // 인증 헬퍼
     // =========================================================================
     function isLoggedIn() {
       return request.auth != null;
@@ -15,6 +15,10 @@ service cloud.firestore {
         && request.auth.token.email_verified == true
         && (request.auth.token.email.matches('.*@gw\\.impact7\\.kr$')
             || request.auth.token.email.matches('.*@impact7\\.kr$'));
+    }
+
+    function withinFieldLimit(max) {
+      return request.resource.data.keys().size() <= max;
     }
 
     // =========================================================================
@@ -47,21 +51,17 @@ service cloud.firestore {
         return request.resource.data.keys().hasOnly(allowed);
       }
 
-      function withinSizeLimit() {
-        return request.resource.data.keys().size() <= 20;
-      }
-
       allow read: if isAuthorized();
 
       allow create: if isAuthorized()
         && hasRequiredStudentFields()
         && hasOnlyAllowedStudentFields()
-        && withinSizeLimit();
+        && withinFieldLimit(20);
 
       allow update: if isAuthorized()
         && hasRequiredStudentFields()
         && hasOnlyAllowedStudentFields()
-        && withinSizeLimit();
+        && withinFieldLimit(20);
 
       allow delete: if isAuthorized();
 
@@ -103,7 +103,7 @@ service cloud.firestore {
           && data.doc_id is string
           && data.doc_id.size() > 0
           && data.change_type is string
-          && data.change_type in ['ENROLL', 'UPDATE', 'WITHDRAW']
+          && data.change_type in ['ENROLL', 'UPDATE', 'WITHDRAW', 'DELETE']
           && data.before is string
           && data.after is string
           && data.google_login_id is string
@@ -126,7 +126,7 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 사용자 역할: 자기 문서만 읽기, 생성/수정/삭제는 콘솔에서만
+    // [DB] 사용자 역할: 자기 문서만 읽기, 생성/수정/삭제는 콘솔에서만
     // =========================================================================
     match /users/{userEmail} {
       allow read: if isAuthorized()
@@ -136,8 +136,7 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 일별 통계 스냅샷: 읽기/생성은 로그인 유저, 수정/삭제 불가
-    // (admin 제한은 앱 레벨에서 UI + 함수로 처리)
+    // [DB] 일별 통계 스냅샷
     // =========================================================================
     match /daily_stats/{dateId} {
 
@@ -155,7 +154,251 @@ service cloud.firestore {
     }
 
     // =========================================================================
-    // 기본 거부
+    // [DSC] Daily Records (일일 기록)
+    // =========================================================================
+    match /daily_records/{docId} {
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && withinFieldLimit(30);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] Retake Schedule (재시/보충 일정)
+    // =========================================================================
+    match /retake_schedule/{docId} {
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && request.resource.data.keys().hasOnly([
+          'student_id', 'student_name', 'branch', 'class_code',
+          'type', 'domain', 'subject', 'title', 'original_date',
+          'scheduled_date', 'scheduled_time', 'result_score',
+          'status', 'created_by', 'created_at',
+          'completed_by', 'completed_at', 'cancelled_by', 'cancelled_at',
+          'updated_by', 'updated_at'
+        ])
+        && withinFieldLimit(25);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] HW Fail Tasks (2차 미통과 밀린 숙제)
+    // =========================================================================
+    match /hw_fail_tasks/{docId} {
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && request.resource.data.keys().hasOnly([
+          'student_id', 'student_name', 'domain', 'type', 'source',
+          'source_date', 'scheduled_date', 'scheduled_time',
+          'alt_hw', 'handler', 'status', 'created_by', 'created_at',
+          'completed_by', 'completed_at', 'cancelled_by', 'cancelled_at', 'branch'
+        ])
+        && request.resource.data.status is string
+        && request.resource.data.status in ['pending', '완료', '취소']
+        && withinFieldLimit(20);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] Test Fail Tasks (2차 미통과 밀린 테스트)
+    // =========================================================================
+    match /test_fail_tasks/{docId} {
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && request.resource.data.keys().hasOnly([
+          'student_id', 'student_name', 'domain', 'type', 'source',
+          'source_date', 'scheduled_date', 'scheduled_time',
+          'alt_hw', 'handler', 'status', 'created_by', 'created_at',
+          'completed_by', 'completed_at', 'cancelled_by', 'cancelled_at', 'branch'
+        ])
+        && request.resource.data.status is string
+        && request.resource.data.status in ['pending', '완료', '취소']
+        && withinFieldLimit(20);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] User Settings (역할 설정)
+    // =========================================================================
+    match /user_settings/{email} {
+
+      function hasOnlyAllowedUserSettingsFields() {
+        return request.resource.data.keys().hasOnly([
+          'role', 'updated_at'
+        ]);
+      }
+
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && hasOnlyAllowedUserSettingsFields()
+        && withinFieldLimit(10);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] Role Memos (역할별 메모)
+    // =========================================================================
+    match /role_memos/{docId} {
+
+      function hasOnlyAllowedRoleMemoFields() {
+        return request.resource.data.keys().hasOnly([
+          'type', 'student_id', 'student_name', 'content',
+          'sender_email', 'sender_role', 'target_roles',
+          'date', 'read_by', 'created_at', 'updated_at'
+        ]);
+      }
+
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && hasOnlyAllowedRoleMemoFields()
+        && withinFieldLimit(15);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] Class Settings (반별 설정: 영역, 테스트 등)
+    // =========================================================================
+    match /class_settings/{classCode} {
+
+      function hasOnlyAllowedClassSettingsFields() {
+        return request.resource.data.keys().hasOnly([
+          'domains', 'test_sections'
+        ]);
+      }
+
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && hasOnlyAllowedClassSettingsFields()
+        && withinFieldLimit(15);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] Class Next Homework (반별 다음숙제)
+    // =========================================================================
+    match /class_next_hw/{docId} {
+
+      function hasOnlyAllowedClassNextHwFields() {
+        return request.resource.data.keys().hasOnly([
+          'class_code', 'date', 'domains',
+          'updated_by', 'updated_at'
+        ]);
+      }
+
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && hasOnlyAllowedClassNextHwFields()
+        && withinFieldLimit(15);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] Daily Checks (일일 체크)
+    // =========================================================================
+    match /daily_checks/{docId} {
+
+      function hasOnlyAllowedDailyCheckFields() {
+        return request.resource.data.keys().hasOnly([
+          // 메타데이터
+          'date', 'student_id', 'enrollment_index', 'class_code',
+          'student_name', 'branch', 'updated_by', 'updated_at',
+          // 출결
+          'attendance', 'attendance_time', 'attendance_reason',
+          // 숙제
+          'hw_reading', 'hw_grammar', 'hw_practice', 'hw_listening',
+          'hw_extra', 'hw_vocab', 'hw_idiom', 'hw_verb3',
+          // 리뷰테스트
+          'test_reading', 'test_grammar', 'test_practice', 'test_listening',
+          // ISC
+          'isc',
+          // 부실 숙제 보완
+          'review_reading', 'review_grammar', 'review_practice', 'review_listening',
+          'review_extra', 'review_vocab', 'review_idiom', 'review_verb3',
+          // 재시
+          'retest_isc', 'retest_reading', 'retest_grammar', 'retest_practice',
+          'retest_listening', 'retest_grading',
+          // 다음 숙제
+          'next_listening', 'next_summary', 'next_reading', 'next_grammar',
+          'next_practice', 'next_listening2', 'next_extra',
+          // 전달사항
+          'note_class_to_study', 'note_to_parent',
+          // 결석생 대응
+          'absent_handler', 'absent_consultation',
+          // LMS
+          'lms_content'
+        ]);
+      }
+
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && hasOnlyAllowedDailyCheckFields()
+        && withinFieldLimit(50);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] Postponed Tasks (연기/보강 작업)
+    // =========================================================================
+    match /postponed_tasks/{docId} {
+
+      function hasOnlyAllowedPostponedFields() {
+        return request.resource.data.keys().hasOnly([
+          'student_id', 'student_name', 'original_date',
+          'scheduled_date', 'scheduled_time', 'content', 'handler',
+          'status', 'result',
+          'created_by', 'created_at', 'updated_by', 'updated_at'
+        ]);
+      }
+
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && hasOnlyAllowedPostponedFields()
+        && withinFieldLimit(15);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DSC] Temp Attendance (임시출석)
+    // =========================================================================
+    match /temp_attendance/{docId} {
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && request.resource.data.keys().hasOnly([
+          'name', 'branch', 'school', 'level', 'grade',
+          'student_phone', 'parent_phone_1', 'memo',
+          'temp_date', 'temp_time', 'visit_status',
+          'created_at', 'created_by'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && withinFieldLimit(15);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // 기본 거부: 위에 매칭되지 않는 모든 경로 차단
     // =========================================================================
     match /{document=**} {
       allow read, write: if false;

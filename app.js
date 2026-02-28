@@ -161,8 +161,10 @@ const normalizeClassTypes = (ct) => {
 // 기존 flat 필드 → enrollments 배열 자동 변환 (마이그레이션)
 const normalizeEnrollments = (s) => {
     if (s.enrollments?.length) return s.enrollments;
-    const levelSymbol = s.level_code || '';
-    const classNumber = s.level_symbol || '';
+    // 레거시 flat 필드 매핑: level_symbol (또는 level_code 폴백) → levelSymbol, class_number → classNumber
+    // GAS Code.gs의 migrateToEnrollments와 동일한 매핑 (기존 코드는 필드가 뒤바뀌어 있었음)
+    const levelSymbol = s.level_symbol || s.level_code || '';
+    const classNumber = s.class_number || '';
     const classTypes = normalizeClassTypes(s.class_type);
     const day = normalizeDays(s.day);
     if (classTypes.length <= 1) {
@@ -211,14 +213,11 @@ const formatDate = (dateStr) => {
 // 사용자 역할 로드
 async function loadUserRole(email) {
     try {
-        console.log('[ROLE] Loading role for:', email);
         const userDoc = await getDoc(doc(db, 'users', email));
         if (userDoc.exists()) {
             currentUserRole = userDoc.data().role || 'teacher';
-            console.log('[ROLE] Role loaded:', currentUserRole);
         } else {
             currentUserRole = 'teacher';
-            console.log('[ROLE] No user doc found, defaulting to teacher');
         }
     } catch (e) {
         console.warn('[ROLE] Failed to load user role:', e.code, e.message);
@@ -317,53 +316,6 @@ async function loadStudentList() {
 window.refreshStudents = loadStudentList;
 
 // ---------------------------------------------------------------------------
-// [임시] 학기 마이그레이션 — 브라우저 콘솔에서 한 번만 실행
-// 기존 enrollments에 semester 필드가 없으면 "2026winter" 추가
-// 사용법: 앱 로그인 후 콘솔에서 _migrateSemester() 실행
-// 완료 후 이 함수는 삭제해도 됨
-// ---------------------------------------------------------------------------
-window._migrateSemester = async () => {
-    if (!currentUser) { console.error('먼저 로그인하세요.'); return; }
-    console.log('마이그레이션 시작...');
-
-    const snap = await getDocs(collection(db, 'students'));
-    console.log(`전체 학생: ${snap.size}명`);
-
-    let needUpdate = 0, alreadyDone = 0, noEnroll = 0;
-    const BATCH_MAX = 400;
-    let batch = writeBatch(db);
-    let batchCount = 0;
-
-    for (const docSnap of snap.docs) {
-        const data = docSnap.data();
-        const enrollments = data.enrollments;
-        if (!enrollments?.length) { noEnroll++; continue; }
-
-        const needsFix = enrollments.some(e => !e.semester);
-        if (!needsFix) { alreadyDone++; continue; }
-
-        const updated = enrollments.map(e => ({ ...e, semester: e.semester || '2026winter' }));
-        batch.update(docSnap.ref, { enrollments: updated });
-        needUpdate++;
-        batchCount++;
-
-        if (batchCount >= BATCH_MAX) {
-            await batch.commit();
-            console.log(`  배치 완료 (${batchCount}건)`);
-            batch = writeBatch(db);
-            batchCount = 0;
-        }
-    }
-
-    if (batchCount > 0) await batch.commit();
-
-    console.log(`\n완료!`);
-    console.log(`  업데이트: ${needUpdate}명`);
-    console.log(`  이미 완료: ${alreadyDone}명`);
-    console.log(`  수업 없음: ${noEnroll}명`);
-};
-
-// ---------------------------------------------------------------------------
 // 일별 통계 스냅샷 (Daily Stats)
 // ---------------------------------------------------------------------------
 const getTodayDateStr = () => {
@@ -429,7 +381,7 @@ async function generateDailyStatsIfNeeded() {
             by_status_branch: byStatusBranch,
             by_level_symbol_branch: byLevelSymbolBranch
         });
-        console.log(`[DAILY STATS] Generated snapshot for ${dateStr}`);
+        // snapshot generated
     } catch (e) {
         console.warn('[DAILY STATS] Failed to generate:', e);
     }
@@ -440,10 +392,11 @@ async function generateDailyStatsIfNeeded() {
 // ---------------------------------------------------------------------------
 function buildSiblingMap() {
     siblingMap = {};
+    const idToStudent = new Map(allStudents.map(s => [s.id, s]));
     const phoneToIds = {};
     allStudents.forEach(s => {
-        const phones = [s.parent_phone_1, s.parent_phone_2]
-            .map(p => (p || '').replace(/\D/g, '')).filter(p => p.length >= 9);
+        const phones = [...new Set([s.parent_phone_1, s.parent_phone_2]
+            .map(p => (p || '').replace(/\D/g, '')).filter(p => p.length >= 9))];
         phones.forEach(p => {
             if (!phoneToIds[p]) phoneToIds[p] = [];
             phoneToIds[p].push(s.id);
@@ -451,10 +404,21 @@ function buildSiblingMap() {
     });
     // 같은 전화번호를 공유하는 학생끼리 형제
     Object.values(phoneToIds).forEach(ids => {
-        if (ids.length < 2) return;
-        ids.forEach(id => {
-            if (!siblingMap[id]) siblingMap[id] = new Set();
-            ids.forEach(sid => { if (sid !== id) siblingMap[id].add(sid); });
+        const uniqueIds = [...new Set(ids)];
+        if (uniqueIds.length < 2) return;
+        uniqueIds.forEach(id => {
+            const student = idToStudent.get(id);
+            if (!student) return;
+            // 같은 이름 = 본인(중복 문서)이므로 형제에서 제외
+            const siblings = uniqueIds.filter(sid => {
+                if (sid === id) return false;
+                const other = idToStudent.get(sid);
+                return other && other.name !== student.name;
+            });
+            if (siblings.length > 0) {
+                if (!siblingMap[id]) siblingMap[id] = new Set();
+                siblings.forEach(sid => siblingMap[id].add(sid));
+            }
         });
     });
 }
@@ -512,9 +476,6 @@ function updateListItemIcons(studentId) {
 }
 
 // ---------------------------------------------------------------------------
-// 사이드바 반별(Class) 필터 동적 생성
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 // On Leave 카운트 업데이트
 // ---------------------------------------------------------------------------
 function updateLeaveCountBadges() {
@@ -551,10 +512,16 @@ function buildClassFilterSidebar() {
         targetStudents = allStudents.filter(s => branchesFromStudent(s).includes(activeFilters.branch));
     }
 
+    // 학기 필터가 활성화되어 있으면 해당 학기 enrollment의 반 코드만 표시
+    const semFilter = activeFilters.semester;
     const codeCount = {};
     targetStudents.forEach(s => {
-        allClassCodes(s).forEach(code => {
-            codeCount[code] = (codeCount[code] || 0) + 1;
+        const enrollments = semFilter
+            ? (s.enrollments || []).filter(e => e.semester === semFilter)
+            : (s.enrollments || []);
+        enrollments.forEach(e => {
+            const code = enrollmentCode(e);
+            if (code) codeCount[code] = (codeCount[code] || 0) + 1;
         });
     });
 
@@ -674,14 +641,13 @@ function updateFilterChips() {
     const chipsEl = document.getElementById('filter-chips');
     const clearBtn = document.getElementById('filter-clear-btn');
     if (!chipsEl) return;
-    if (active.length === 0) {
+    if (nonSemester.length === 0) {
         chipsEl.textContent = '';
         if (clearBtn) clearBtn.style.display = 'none';
         return;
     }
-    chipsEl.textContent = active.map(([, v]) => v).join(' · ');
-    // clear 버튼은 semester 외 필터가 있을 때만 표시 (semester는 드롭다운에서 직접 변경)
-    if (clearBtn) clearBtn.style.display = nonSemester.length > 0 ? 'flex' : 'none';
+    chipsEl.textContent = nonSemester.map(([, v]) => v).join(' · ');
+    if (clearBtn) clearBtn.style.display = 'flex';
 }
 
 window.clearFilters = () => {
@@ -689,6 +655,8 @@ window.clearFilters = () => {
     const keepSemester = activeFilters.semester;
     Object.keys(activeFilters).forEach(k => activeFilters[k] = null);
     activeFilters.semester = keepSemester;
+    // 학기 드롭다운 UI 동기화
+    syncSemesterDropdowns(keepSemester || '');
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
     document.querySelector('.menu-l1[data-filter-type="all"]')?.classList.add('active');
     // 반별 필터 active 해제
@@ -696,28 +664,39 @@ window.clearFilters = () => {
     applyFilterAndRender();
 };
 
+// 사이드바 + 모바일 학기 드롭다운 동기화
+function syncSemesterDropdowns(val) {
+    const ids = ['semester-filter', 'semester-filter-mobile'];
+    ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = val; });
+}
+
 window.handleSemesterFilter = (val) => {
     activeFilters.semester = val || null;
     // localStorage에 저장 — 페이지 새로고침 후에도 유지
     if (val) localStorage.setItem('semesterFilter', val);
     else localStorage.removeItem('semesterFilter');
+    syncSemesterDropdowns(val || '');
     applyFilterAndRender();
 };
 
 function buildSemesterFilter() {
-    const sel = document.getElementById('semester-filter');
-    if (!sel) return;
     const semesters = new Set();
     allStudents.forEach(s => (s.enrollments || []).forEach(e => { if (e.semester) semesters.add(e.semester); }));
     const sorted = [...semesters].sort().reverse();
-    // localStorage 저장값 또는 현재 드롭다운 값 복원
-    const current = activeFilters.semester || sel.value;
-    sel.innerHTML = '<option value="">전체 학기</option>' + sorted.map(s => `<option value="${s}"${s === current ? ' selected' : ''}>${s}</option>`).join('');
+    const current = activeFilters.semester || '';
+    const optionsHtml = '<option value="">전체 학기</option>' + sorted.map(s => {
+        return `<option value="${esc(s)}"${s === current ? ' selected' : ''}>${esc(s)}</option>`;
+    }).join('');
+    // 사이드바 + 모바일 드롭다운 모두 업데이트
+    ['semester-filter', 'semester-filter-mobile'].forEach(id => {
+        const sel = document.getElementById(id);
+        if (sel) { sel.innerHTML = optionsHtml; sel.value = current; }
+    });
     // localStorage에서 복원된 값이 유효한 학기인지 확인
     if (activeFilters.semester && !semesters.has(activeFilters.semester)) {
         activeFilters.semester = null;
         localStorage.removeItem('semesterFilter');
-        sel.value = '';
+        syncSemesterDropdowns('');
     }
 }
 
@@ -918,7 +897,8 @@ function checkHomeView() {
         homeView.style.display = 'flex';
         if (panelHeader) panelHeader.style.display = 'none';
         if (listItems) listItems.style.display = 'none';
-        document.getElementById('bulk-action-bar')?.style && (document.getElementById('bulk-action-bar').style.display = 'none');
+        const bulkBar = document.getElementById('bulk-action-bar');
+        if (bulkBar) bulkBar.style.display = 'none';
     } else {
         homeView.style.display = 'none';
         if (panelHeader) panelHeader.style.display = '';
@@ -1258,7 +1238,8 @@ window.submitNewStudent = async () => {
             const oldCodes = allClassCodes(oldStudent).join(', ') || '—';
             const newCodes = (studentData.enrollments || []).map(e => enrollmentCode(e)).filter(Boolean).join(', ') || '—';
             const beforeStr = `상태:${oldStudent.status || ''}, 반:${oldCodes}, 요일:${displayDays(combinedDays(oldStudent))}`;
-            const afterStr = `상태:${studentData.status}, 반:${newCodes}, 요일:${displayDays(studentData.enrollments?.[0]?.day)}`;
+            const newDays = [...new Set((studentData.enrollments || []).flatMap(e => normalizeDays(e.day)))];
+            const afterStr = `상태:${studentData.status}, 반:${newCodes}, 요일:${displayDays(newDays)}`;
 
             await setDoc(doc(db, 'students', docId), studentData, { merge: true });
             await addDoc(collection(db, 'history_logs'), {
@@ -1274,13 +1255,14 @@ window.submitNewStudent = async () => {
             const existingStudent = allStudents.find(s => s.id === docId);
             if (existingStudent) {
                 // Student exists — add new enrollments to existing doc
-                const mergedEnrollments = [...(existingStudent.enrollments || []), ...allEnrollments];
-                await setDoc(doc(db, 'students', docId), { enrollments: mergedEnrollments }, { merge: true });
+                const newEnrollments = studentData.enrollments || [];
+                const mergedEnrollments = [...(existingStudent.enrollments || []), ...newEnrollments];
+                await setDoc(doc(db, 'students', docId), { ...studentData, enrollments: mergedEnrollments }, { merge: true });
                 await addDoc(collection(db, 'history_logs'), {
                     doc_id: docId,
                     change_type: 'UPDATE',
                     before: `수업: ${allClassCodes(existingStudent).join(', ') || '—'}`,
-                    after: `수업 추가: ${allEnrollments.map(e => enrollmentCode(e)).join(', ')}`,
+                    after: `수업 추가: ${newEnrollments.map(e => enrollmentCode(e)).join(', ')}`,
                     google_login_id: currentUser?.email || 'system',
                     timestamp: serverTimestamp(),
                 });
@@ -1301,13 +1283,17 @@ window.submitNewStudent = async () => {
 
         _pendingEnrollments = [];
         hideForm();
-        await loadStudentList();
 
-        // 저장한 학생 자동 선택
-        const savedStudent = allStudents.find(s => s.id === currentStudentId);
-        if (savedStudent) {
-            const targetEl = document.querySelector(`.list-item[data-id="${CSS.escape(currentStudentId)}"]`);
-            selectStudent(savedStudent.id, savedStudent, targetEl);
+        // 저장 성공 후 UI 갱신 — 여기서의 에러는 저장과 무관하므로 별도 처리
+        try {
+            await loadStudentList();
+            const savedStudent = allStudents.find(s => s.id === currentStudentId);
+            if (savedStudent) {
+                const targetEl = document.querySelector(`.list-item[data-id="${CSS.escape(currentStudentId)}"]`);
+                selectStudent(savedStudent.id, savedStudent, targetEl);
+            }
+        } catch (refreshErr) {
+            console.warn('[POST-SAVE REFRESH]', refreshErr);
         }
     } catch (err) {
         console.error('[SAVE ERROR]', err);
@@ -1518,7 +1504,7 @@ window.handleEditEnrollClassType = (idx, val) => {
     const card = cards[idx];
     if (!card) return;
     const isRegular = val === '정규';
-    const startLabel = card.querySelectorAll('.field-label')[4]; // 5번째 label = 시작일/등원일
+    const startLabel = card.querySelector('[data-field="start_date"]')?.closest('.form-field')?.querySelector('.field-label');
     if (startLabel) startLabel.textContent = isRegular ? '등원일' : '시작일';
     const endField = card.querySelector('[data-field="end_date"]')?.closest('.form-field');
     if (endField) endField.style.display = isRegular ? 'none' : 'block';
@@ -2019,26 +2005,98 @@ window.checkDurationLimit = () => {
 // ---------------------------------------------------------------------------
 // Google Sheets Export / Import (GAS Web App 연동)
 // ---------------------------------------------------------------------------
-// GAS Web App 배포 후 아래 URL을 실제 URL로 교체하세요
-const GAS_WEB_APP_URL = 'https://script.google.com/a/macros/gw.impact7.kr/s/AKfycbwDHJopip-3zzwnVIrbvGaH-VohyA9DMoJPVfMj6QV92JvYUp7C_SLGUm-coKKOYEcn-w/exec';
-
 window.handleSheetExport = async () => {
     if (!allStudents || allStudents.length === 0) {
         alert('내보낼 데이터가 없습니다.');
         return;
     }
-    try {
-        alert('구글시트를 생성 중입니다... 잠시 기다려주세요.');
-        const resp = await fetch(GAS_WEB_APP_URL + '?action=export&format=json');
-        const json = await resp.json();
-        if (json.url) {
-            window.open(json.url, '_blank');
+    const token = getGoogleAccessToken();
+    if (!token) {
+        alert('구글 드라이브 접근 권한이 필요합니다.\n로그아웃 후 다시 로그인해주세요.');
+        return;
+    }
+
+    const EXPORT_HEADERS = [
+        '이름', '학부', '학교', '학년', '학생연락처',
+        '학부모연락처1', '학부모연락처2', '소속', '레벨기호', '반넘버',
+        '수업종류', '시작일', '종료일', '요일',
+        '상태', '휴원시작일', '휴원종료일', '학기'
+    ];
+
+    // allStudents → enrollment 단위 행으로 변환 (GAS studentsToRows와 동일)
+    const dataRows = [];
+    allStudents.forEach(s => {
+        const enrollments = s.enrollments || [];
+        const branch = s.branch || '';
+        if (enrollments.length === 0) {
+            dataRows.push([
+                s.name || '', s.level || '', s.school || '', s.grade || '',
+                s.student_phone || '', s.parent_phone_1 || '', s.parent_phone_2 || '',
+                branch, '', '', '정규', '', '', '',
+                s.status || '재원', s.pause_start_date || '', s.pause_end_date || '', ''
+            ]);
         } else {
-            alert('시트 생성 실패: ' + (json.error || '알 수 없는 오류'));
+            enrollments.forEach(e => {
+                const dayStr = Array.isArray(e.day) ? e.day.join(',') : (e.day || '');
+                dataRows.push([
+                    s.name || '', s.level || '', s.school || '', s.grade || '',
+                    s.student_phone || '', s.parent_phone_1 || '', s.parent_phone_2 || '',
+                    branch,
+                    e.level_symbol || '', e.class_number || '', e.class_type || '정규',
+                    e.start_date || '', e.end_date || '', dayStr,
+                    s.status || '재원', s.pause_start_date || '', s.pause_end_date || '', e.semester || ''
+                ]);
+            });
         }
+    });
+
+    try {
+        // 1. 스프레드시트 생성 + 헤더 + 데이터 한번에
+        const today = new Date().toISOString().slice(0, 10);
+        const headerRow = {
+            values: EXPORT_HEADERS.map(h => ({
+                userEnteredValue: { stringValue: h },
+                userEnteredFormat: {
+                    textFormat: { bold: true, foregroundColorStyle: { rgbColor: { red: 1, green: 1, blue: 1 } } },
+                    backgroundColorStyle: { rgbColor: { red: 0.263, green: 0.522, blue: 0.957 } }
+                }
+            }))
+        };
+        const bodyRows = dataRows.map(row => ({
+            values: row.map(cell => ({ userEnteredValue: { stringValue: String(cell) } }))
+        }));
+
+        const createResp = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                properties: { title: `impact7DB_${today}` },
+                sheets: [{
+                    properties: { title: '학생데이터', gridProperties: { frozenRowCount: 1 } },
+                    data: [{ startRow: 0, startColumn: 0, rowData: [headerRow, ...bodyRows] }]
+                }]
+            })
+        });
+
+        if (!createResp.ok) throw new Error(await createResp.text());
+        const created = await createResp.json();
+        const sid = created.sheets[0].properties.sheetId;
+
+        // 2. 필터 + 열 자동 맞춤 (실패해도 시트 자체는 생성됨)
+        const totalRows = dataRows.length + 1;
+        const fmtResp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${created.spreadsheetId}:batchUpdate`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requests: [
+                { setBasicFilter: { filter: { range: { sheetId: sid, startRowIndex: 0, endRowIndex: totalRows, startColumnIndex: 0, endColumnIndex: EXPORT_HEADERS.length } } } },
+                { autoResizeDimensions: { dimensions: { sheetId: sid, dimension: 'COLUMNS', startIndex: 0, endIndex: EXPORT_HEADERS.length } } }
+            ]})
+        });
+        if (!fmtResp.ok) console.warn('[EXPORT] 서식 설정 실패:', await fmtResp.text());
+
+        window.open(created.spreadsheetUrl, '_blank');
     } catch (e) {
-        // fetch 실패 시 직접 열기 fallback
-        window.open(GAS_WEB_APP_URL + '?action=export', '_blank');
+        alert('시트 내보내기 실패: ' + e.message + '\n\n로그아웃 후 다시 로그인하면 해결될 수 있습니다.');
     }
 };
 
@@ -2052,26 +2110,100 @@ window.closeUploadModal = (e) => {
 };
 
 window.handleSheetUrlUpload = () => {
-    const url = prompt('구글시트 URL을 붙여넣으세요:');
+    const url = prompt('구글시트 URL을 붙여넣으세요:\n(예: https://docs.google.com/spreadsheets/d/...)');
     if (!url) return;
     const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
-    if (!m) { alert('올바른 구글시트 URL이 아닙니다.'); return; }
+    if (!m) {
+        if (url.includes('script.google.com')) {
+            alert('스크립트 URL은 사용할 수 없습니다.\n\n구글시트가 열린 후 주소창의 URL을 복사하세요.\n(docs.google.com/spreadsheets/d/... 형식)\n\n또는 "드라이브에서 선택"을 이용하세요.');
+        } else {
+            alert('올바른 구글시트 URL이 아닙니다.\n\nURL 형식: https://docs.google.com/spreadsheets/d/...');
+        }
+        return;
+    }
     importFromSheetId(m[1], '시트 업로드');
 };
 
 window.handleSheetTemplate = async () => {
+    const token = getGoogleAccessToken();
+    if (!token) {
+        alert('구글 드라이브 접근 권한이 필요합니다.\n로그아웃 후 다시 로그인해주세요.');
+        return;
+    }
+
+    const TMPL_HEADERS = [
+        '이름', '학부', '학교', '학년', '학생연락처',
+        '학부모연락처1', '학부모연락처2', '소속', '레벨기호', '반넘버',
+        '수업종류', '시작일', '종료일', '요일',
+        '상태', '휴원시작일', '휴원종료일', '학기'
+    ];
+
     try {
-        alert('가져오기 템플릿을 생성 중입니다... 잠시 기다려주세요.');
-        const resp = await fetch(GAS_WEB_APP_URL + '?action=template&format=json');
-        const json = await resp.json();
-        if (json.url) {
-            window.open(json.url, '_blank');
-            alert('템플릿을 채운 뒤, 업로드 버튼 → "4번"을 선택하면 바로 업로드됩니다.');
-        } else {
-            alert('시트 생성 실패: ' + (json.error || '알 수 없는 오류'));
-        }
+        // 1. 사용자 드라이브에 스프레드시트 생성
+        const createResp = await fetch('https://sheets.googleapis.com/v4/spreadsheets', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                properties: { title: 'impact7DB_가져오기_템플릿' },
+                sheets: [{
+                    properties: { title: '데이터입력', gridProperties: { frozenRowCount: 1 } },
+                    data: [{
+                        startRow: 0, startColumn: 0,
+                        rowData: [{
+                            values: TMPL_HEADERS.map(h => ({
+                                userEnteredValue: { stringValue: h },
+                                userEnteredFormat: {
+                                    textFormat: { bold: true, foregroundColorStyle: { rgbColor: { red: 1, green: 1, blue: 1 } } },
+                                    backgroundColorStyle: { rgbColor: { red: 0.204, green: 0.659, blue: 0.325 } }
+                                }
+                            }))
+                        }]
+                    }]
+                }]
+            })
+        });
+
+        if (!createResp.ok) throw new Error(await createResp.text());
+        const created = await createResp.json();
+        const sid = created.sheets[0].properties.sheetId;
+        const R = 101; // endRowIndex (100행)
+
+        // 2. 데이터 유효성 + 날짜 서식 설정
+        const mkList = (start, end, vals, strict) => ({
+            setDataValidation: {
+                range: { sheetId: sid, startRowIndex: 1, endRowIndex: R, startColumnIndex: start, endColumnIndex: end },
+                rule: { condition: { type: 'ONE_OF_LIST', values: vals.map(v => ({ userEnteredValue: v })) }, showCustomUi: true, strict }
+            }
+        });
+        const mkDate = (col) => ({
+            repeatCell: {
+                range: { sheetId: sid, startRowIndex: 1, endRowIndex: R, startColumnIndex: col, endColumnIndex: col + 1 },
+                cell: { userEnteredFormat: { numberFormat: { type: 'DATE', pattern: 'yyyy-mm-dd' } } },
+                fields: 'userEnteredFormat.numberFormat'
+            }
+        });
+
+        const valResp = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${created.spreadsheetId}:batchUpdate`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requests: [
+                mkList(1, 2, ['초등', '중등', '고등'], true),
+                mkList(10, 11, ['정규', '특강', '내신'], true),
+                mkList(14, 15, ['등원예정', '재원', '실휴원', '가휴원', '퇴원'], true),
+                mkList(17, 18, [
+                    '2026-Winter','2026-Spring1','2026-Spring2','2026-Summer','2026-Autumn','2026-Spring',
+                    '2027-Winter','2027-Spring1','2027-Spring2','2027-Summer','2027-Autumn','2027-Spring'
+                ], false),
+                mkDate(11), mkDate(12), mkDate(15), mkDate(16),
+                { autoResizeDimensions: { dimensions: { sheetId: sid, dimension: 'COLUMNS', startIndex: 0, endIndex: TMPL_HEADERS.length } } }
+            ]})
+        });
+        if (!valResp.ok) console.warn('[TEMPLATE] 유효성 설정 실패:', await valResp.text());
+
+        window.open(created.spreadsheetUrl, '_blank');
+        alert('내 드라이브에 템플릿이 생성되었습니다!\n\n데이터를 입력한 후:\n• "시트 URL로 업로드" → 주소창 URL 붙여넣기\n• "드라이브에서 선택" → 템플릿 파일 선택');
     } catch (e) {
-        window.open(GAS_WEB_APP_URL + '?action=template', '_blank');
+        alert('템플릿 생성 실패: ' + e.message + '\n\n로그아웃 후 다시 로그인하면 해결될 수 있습니다.');
     }
 };
 
@@ -2113,19 +2245,35 @@ window.handleSheetPicker = async () => {
 
 async function importFromSheetId(sheetId, sheetName) {
     try {
-        if (!confirm(`"${sheetName}" 시트에서 데이터를 가져올까요?`)) return;
+        const token = getGoogleAccessToken();
+        if (!token) { alert('구글 드라이브 접근 권한이 필요합니다.\n로그아웃 후 다시 로그인해주세요.'); return; }
 
-        // Google Sheets API로 시트 데이터 직접 읽기 (GAS 경유 없음)
-        const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A:Z`;
-        const resp = await fetch(url, {
-            headers: { 'Authorization': `Bearer ${getGoogleAccessToken()}` }
-        });
+        // 시트 탭 목록 조회
+        const metaResp = await fetch(
+            `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets.properties`,
+            { headers: { 'Authorization': `Bearer ${token}` } }
+        );
+        if (!metaResp.ok) { alert('시트 읽기 실패: ' + await metaResp.text()); return; }
+        const meta = await metaResp.json();
+        const tabs = meta.sheets.map(s => s.properties.title);
 
-        if (!resp.ok) {
-            const errText = await resp.text();
-            alert('시트 읽기 실패: ' + errText);
-            return;
+        let selectedTab = tabs[0];
+        if (tabs.length > 1) {
+            const tabList = tabs.map((t, i) => `${i + 1}. ${t}`).join('\n');
+            const choice = prompt(`"${sheetName}"에 탭이 ${tabs.length}개 있습니다.\n가져올 탭 번호를 입력하세요:\n\n${tabList}`);
+            if (!choice) return;
+            const idx = parseInt(choice, 10) - 1;
+            if (idx < 0 || idx >= tabs.length) { alert('올바른 번호를 입력해주세요.'); return; }
+            selectedTab = tabs[idx];
         }
+
+        if (!confirm(`"${sheetName}" → [${selectedTab}] 탭에서 데이터를 가져올까요?`)) return;
+
+        // 선택된 탭에서 데이터 읽기
+        const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(selectedTab)}!A:Z`;
+        const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } });
+
+        if (!resp.ok) { alert('시트 읽기 실패: ' + await resp.text()); return; }
 
         const data = await resp.json();
         const sheetRows = data.values;
@@ -2305,16 +2453,41 @@ async function runUpsertFromRows(rows, sourceName) {
 
             // ACCUMULATE enrollments by semester
             const incomingSemesters = new Set(incoming.enrollments.map(e => e.semester).filter(Boolean));
-            const keptEnrolls = (ex.enrollments || []).filter(e => !incomingSemesters.has(e.semester));
-            const sameExisting = (ex.enrollments || []).filter(e => incomingSemesters.has(e.semester));
+            const hasSemesterData = incomingSemesters.size > 0;
+            const keptEnrolls = hasSemesterData
+                ? (ex.enrollments || []).filter(e => !incomingSemesters.has(e.semester))
+                : []; // 학기 정보 없으면 전체 교체 (중복 방지)
+            const sameExisting = hasSemesterData
+                ? (ex.enrollments || []).filter(e => incomingSemesters.has(e.semester))
+                : (ex.enrollments || []); // 학기 정보 없으면 전체를 비교 대상으로
             const newBucket = [];
             const enrollAdded = [], enrollChanged2 = [];
+            const matchedExisting = new Set();
             for (const inc of incoming.enrollments) {
                 const key = enrollmentCode(inc);
-                const match = sameExisting.find(e => enrollmentCode(e) === key && e.semester === inc.semester);
+                const match = hasSemesterData
+                    ? sameExisting.find(e => enrollmentCode(e) === key && e.semester === inc.semester)
+                    : sameExisting.find((e, i) => enrollmentCode(e) === key && !matchedExisting.has(i));
                 if (!match) { newBucket.push({ ...inc }); enrollAdded.push(inc); }
-                else if (JSON.stringify(match) !== JSON.stringify(inc)) { enrollChanged2.push(inc); newBucket.push({ ...inc }); }
-                else { newBucket.push({ ...match }); }
+                else {
+                    if (!hasSemesterData) {
+                        const matchIdx = sameExisting.indexOf(match);
+                        matchedExisting.add(matchIdx);
+                    }
+                    // 기존 enrollment에 비어있지 않은 incoming 값만 덮어쓰기 (부분 업데이트 지원)
+                    const merged = { ...match };
+                    for (const [k, v] of Object.entries(inc)) {
+                        if (k === 'day' && Array.isArray(v) && v.length === 0) continue;
+                        if (v === '' || v === undefined || v === null) continue;
+                        merged[k] = v;
+                    }
+                    if (JSON.stringify(match) !== JSON.stringify(merged)) { enrollChanged2.push(merged); newBucket.push(merged); }
+                    else { newBucket.push({ ...match }); }
+                }
+            }
+            // 학기 정보 없을 때: 매칭되지 않은 기존 enrollment도 유지
+            if (!hasSemesterData) {
+                sameExisting.forEach((e, i) => { if (!matchedExisting.has(i)) keptEnrolls.push(e); });
             }
             const mergedEnrollments = [...keptEnrolls, ...newBucket];
             const enrollChanged = enrollAdded.length > 0 || enrollChanged2.length > 0;
@@ -2348,7 +2521,7 @@ async function runUpsertFromRows(rows, sourceName) {
     }
 
     // 5) Show confirmation dialog
-    let msg = `📁 ${esc(sourceName)}\n\n`;
+    let msg = `📁 ${sourceName}\n\n`;
     msg += `📥 신규 등록: ${results.inserted.length}명\n`;
     msg += `📝 정보 변경: ${results.updated.length}명\n`;
     msg += `⏭️ 변경 없음: ${results.skipped.length}명\n\n`;
@@ -2370,14 +2543,26 @@ async function runUpsertFromRows(rows, sourceName) {
         if (results.updated.length > 20) msg += `  ... 외 ${results.updated.length - 20}명\n`;
     }
 
-    if (writes.length === 0) { alert('변경사항이 없습니다.'); return; }
+    if (writes.length === 0) {
+        const totalRows = Object.keys(studentMap).length;
+        const firstRow = rows[0] || {};
+        const detectedKeys = Object.keys(firstRow).join(', ');
+        alert(
+            '변경사항이 없습니다.\n\n' +
+            `[진단 정보]\n` +
+            `읽은 행: ${rows.length}개\n` +
+            `인식된 학생: ${totalRows}명\n` +
+            `건너뜀: ${results.skipped.length}명\n` +
+            `헤더: ${detectedKeys || '(없음)'}`
+        );
+        return;
+    }
 
     msg += `\n적용하시겠습니까?`;
     if (!confirm(msg)) return;
 
-    // 6) Write to Firestore in batches
-    const BATCH_SIZE = 249;
-    let written = 0;
+    // 6) Write to Firestore in batches (학생 write + history log = 2 ops/item, 500 한도)
+    const BATCH_SIZE = 200;
     for (let i = 0; i < writes.length; i += BATCH_SIZE) {
         const chunk = writes.slice(i, i + BATCH_SIZE);
         const logChunk = logEntries.slice(i, i + BATCH_SIZE);
@@ -2395,35 +2580,31 @@ async function runUpsertFromRows(rows, sourceName) {
         }
 
         await batch.commit();
-        written += chunk.length;
     }
 
     alert(`✅ 완료!\n\n신규: ${results.inserted.length}명\n변경: ${results.updated.length}명\n건너뜀: ${results.skipped.length}명`);
     await loadStudentList();
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('[impact7DB] Dashboard initialized.');
-});
-
 // 메모 모달 상태 — ESC 핸들러보다 먼저 선언
 let _memoModalContext = null; // 'view' | 'form'
 
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+        const isVisible = (el) => el && el.style.display === 'flex';
         const endClassModal = document.getElementById('end-class-modal');
-        if (endClassModal?.style.display !== 'none') {
+        if (isVisible(endClassModal)) {
             endClassModal.style.display = 'none';
             _endClassTarget = null;
             return;
         }
         const enrollModal = document.getElementById('enrollment-modal');
-        if (enrollModal?.style.display !== 'none') {
+        if (isVisible(enrollModal)) {
             enrollModal.style.display = 'none';
             return;
         }
         const modal = document.getElementById('memo-modal');
-        if (modal?.style.display !== 'none') {
+        if (isVisible(modal)) {
             modal.style.display = 'none';
             _memoModalContext = null;
         }
@@ -2465,10 +2646,10 @@ function renderMemos(memos, studentId) {
         card.className = 'memo-card';
         card.dataset.memoId = memo.id;
         card.innerHTML = `
-            <div class="memo-preview" onclick="window.toggleMemo('${memo.id}')">
+            <div class="memo-preview">
                 <span class="memo-preview-text">${esc(preview)}</span>
                 <div class="memo-actions">
-                    <button class="memo-delete-btn" onclick="event.stopPropagation(); window.deleteMemo('${studentId}','${memo.id}')" title="삭제">
+                    <button class="memo-delete-btn" title="삭제">
                         <span class="material-symbols-outlined" style="font-size:16px;">close</span>
                     </button>
                 </div>
@@ -2477,6 +2658,12 @@ function renderMemos(memos, studentId) {
                 <div class="memo-text">${esc(memo.text || '').replace(/\n/g, '<br>')}</div>
             </div>
         `;
+        // addEventListener로 XSS 방지 (studentId에 작은따옴표 등 특수문자가 포함될 수 있음)
+        card.querySelector('.memo-preview').addEventListener('click', () => window.toggleMemo(memo.id));
+        card.querySelector('.memo-delete-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            window.deleteMemo(studentId, memo.id);
+        });
         container.appendChild(card);
     });
 }
@@ -2580,12 +2767,14 @@ async function loadFormMemos(studentId) {
             row.innerHTML = `
                 <div class="memo-form-meta">
                     <span>${esc(dateStr)}${author ? ' · ' + esc(author) : ''}</span>
-                    <button class="memo-delete-btn" onclick="window.deleteFormMemo('${studentId}','${memo.id}')" title="삭제">
+                    <button class="memo-delete-btn" title="삭제">
                         <span class="material-symbols-outlined" style="font-size:15px;">close</span>
                     </button>
                 </div>
                 <div class="memo-form-text">${esc(memo.text || '').replace(/\n/g, '<br>')}</div>
             `;
+            // addEventListener로 XSS 방지
+            row.querySelector('.memo-delete-btn').addEventListener('click', () => window.deleteFormMemo(studentId, memo.id));
             container.appendChild(row);
         });
     } catch (e) {
@@ -3083,11 +3272,8 @@ window.confirmBulkDelete = async () => {
 // ---------------------------------------------------------------------------
 // 일별 통계 뷰어 (Daily Stats Viewer)
 // ---------------------------------------------------------------------------
-let statsViewActive = false;
-
 window.showDailyStats = async () => {
     if (currentUserRole !== 'admin') return;
-    statsViewActive = true;
     const statsView = document.getElementById('daily-stats-view');
     const listPanel = document.querySelector('.list-panel');
     if (!statsView || !listPanel) return;
@@ -3095,7 +3281,8 @@ window.showDailyStats = async () => {
     // 목록 패널 내용을 통계 뷰로 교체
     statsView.style.display = 'block';
     listPanel.querySelector('.panel-header').style.display = 'none';
-    document.getElementById('bulk-action-bar')?.style && (document.getElementById('bulk-action-bar').style.display = 'none');
+    const bulkBar = document.getElementById('bulk-action-bar');
+    if (bulkBar) bulkBar.style.display = 'none';
     listPanel.querySelector('.list-items').style.display = 'none';
 
     // 오늘 날짜로 로드
@@ -3105,7 +3292,6 @@ window.showDailyStats = async () => {
 };
 
 window.hideDailyStats = () => {
-    statsViewActive = false;
     const statsView = document.getElementById('daily-stats-view');
     const listPanel = document.querySelector('.list-panel');
     if (!statsView || !listPanel) return;

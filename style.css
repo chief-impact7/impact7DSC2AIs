@@ -78,8 +78,14 @@ body {
 .logo {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
     margin-left: 4px;
+}
+
+.logo-img {
+    height: 30px;
+    width: auto;
+    object-fit: contain;
 }
 
 .text-primary {
@@ -141,26 +147,30 @@ body {
 }
 
 .compose-btn {
-    background: #c2e7ff;
-    color: #001d35;
+    background: #fce8e6;
+    color: #8b2500;
     border: none;
-    border-radius: 16px;
-    padding: 16px 24px 16px 16px;
+    border-radius: 0 16px 16px 0;
+    padding: 0 12px;
+    height: 36px;
+    width: calc(100% - 8px);
     font-family: var(--font-heading);
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 12px;
     cursor: pointer;
-    margin-bottom: 16px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-    transition: box-shadow 0.2s;
-    align-self: flex-start;
+    margin-bottom: 2px;
+    transition: background 0.15s;
+}
+
+.compose-btn .material-symbols-outlined {
+    color: #c5221f;
 }
 
 .compose-btn:hover {
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    background: #f5c6c2;
 }
 
 .nav-list {
@@ -194,15 +204,7 @@ body {
     font-weight: 500;
 }
 
-.sidebar-label {
-    margin: 16px 0 6px 12px;
-    font-size: 11px;
-    font-family: var(--font-heading);
-    font-weight: 500;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    color: var(--text-sec);
-}
+
 
 /* ── Sidebar 3-Level Menu ────────────────────────────────────────────────── */
 
@@ -346,18 +348,6 @@ summary.menu-l2 .material-symbols-outlined {
     background: #34a853;
 }
 
-.c-orange {
-    background: #fa7b17;
-}
-
-.c-yellow {
-    background: #f9ab00;
-}
-
-.c-gray {
-    background: #9aa0a6;
-}
-
 /* ── Main Content ────────────────────────────────────────────────────────── */
 .main-content {
     flex: 1;
@@ -401,18 +391,47 @@ summary.menu-l2 .material-symbols-outlined {
     flex-shrink: 0;
 }
 
-.semester-filter {
-    font-size: 12px;
-    font-family: var(--font-body);
-    padding: 2px 6px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-    color: var(--text-main);
+.semester-selector {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
+    height: 36px;
+    border-radius: 0 16px 16px 0;
+    width: calc(100% - 8px);
+    margin-bottom: 2px;
     cursor: pointer;
+    background: #e6f4ea;
+    transition: background 0.15s;
+}
+
+.semester-selector:hover {
+    background: #ceead6;
+}
+
+.semester-selector .material-symbols-outlined {
+    font-size: 20px;
+    color: #137333;
     flex-shrink: 0;
 }
-.semester-filter:focus {
+
+.semester-select {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    font-family: var(--font-heading);
+    font-weight: 500;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'%3E%3Cpath fill='%23137333' d='M7 10l5 5 5-5z'/%3E%3C/svg%3E") no-repeat right 4px center;
+    color: #1e4620;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.semester-select:focus {
     outline: none;
     border-color: var(--primary);
 }
@@ -432,6 +451,25 @@ summary.menu-l2 .material-symbols-outlined {
 
 .filter-chips:empty {
     display: none;
+}
+
+.semester-filter-mobile {
+    display: none;
+    font-size: 12px;
+    font-family: var(--font-body);
+    font-weight: 500;
+    padding: 2px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-main);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.semester-filter-mobile:focus {
+    outline: none;
+    border-color: var(--primary);
 }
 
 .filter-clear-btn {
@@ -642,12 +680,6 @@ summary.menu-l2 .material-symbols-outlined {
     color: var(--primary);
 }
 
-.mono {
-    font-family: monospace;
-    font-size: 13px;
-    word-break: break-all;
-}
-
 /* ── Registration Form ───────────────────────────────────────────────────── */
 .form-header-title {
     font-family: var(--font-heading);
@@ -756,10 +788,6 @@ summary.menu-l2 .material-symbols-outlined {
 .form-row .form-field {
     flex: 1;
     min-width: 0;
-}
-
-.form-memo-card {
-    /* 다른 카드와 동일한 그리드 셀 크기 */
 }
 
 .memo-form-item {
@@ -1394,11 +1422,6 @@ summary.menu-l2 .material-symbols-outlined {
     margin-bottom: 6px;
 }
 
-.end-class-withdraw-label {
-    background: #fce8e6;
-    color: #c5221f;
-}
-
 .end-class-list {
     list-style: none;
     padding: 0;
@@ -1574,40 +1597,6 @@ summary.menu-l2 .material-symbols-outlined {
     gap: 4px;
 }
 
-.bulk-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    background: var(--surface-container);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 4px 12px;
-    font-family: var(--font-heading);
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-main);
-    cursor: pointer;
-    transition: background 0.15s, box-shadow 0.15s;
-}
-
-.bulk-btn .material-symbols-outlined {
-    font-size: 16px;
-}
-
-.bulk-btn:hover {
-    background: var(--surface-hover);
-    box-shadow: 0 1px 2px rgba(0,0,0,.1);
-}
-
-.bulk-btn-danger {
-    color: #c5221f;
-    border-color: #f5c6c2;
-}
-
-.bulk-btn-danger:hover {
-    background: #fce8e6;
-}
-
 .bulk-btn-close {
     background: none;
     border: none;
@@ -1752,17 +1741,6 @@ summary.menu-l2 .material-symbols-outlined {
     flex-shrink: 0;
     padding: 6px 12px;
     font-size: 13px;
-}
-
-.bulk-edit-hint {
-    font-size: 11px;
-    color: var(--text-sec);
-    margin-top: 6px;
-}
-
-.bulk-edit-danger {
-    border-color: #f5c6c2;
-    background: #fef7f6;
 }
 
 /* ── List Item Day Display ─────────────────────────────────────────────── */
@@ -2021,44 +1999,6 @@ summary.menu-l2 .material-symbols-outlined {
     border-bottom: 1px solid var(--border);
 }
 
-.stats-cards {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 20px;
-}
-
-.stats-card {
-    flex: 1;
-    background: var(--surface-container);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 16px;
-    text-align: center;
-}
-
-.stats-card-primary {
-    background: var(--primary-light);
-    border-color: #c2d9f7;
-}
-
-.stats-card-value {
-    font-family: var(--font-heading);
-    font-size: 32px;
-    font-weight: 700;
-    color: var(--text-main);
-    line-height: 1.2;
-}
-
-.stats-card-primary .stats-card-value {
-    color: var(--primary);
-}
-
-.stats-card-label {
-    font-size: 12px;
-    color: var(--text-sec);
-    margin-top: 4px;
-}
-
 .stats-section {
     margin-bottom: 20px;
 }
@@ -2134,7 +2074,7 @@ summary.menu-l2 .material-symbols-outlined {
     display: none;
 }
 
-.detail-header .icon-btn:first-child {
+#detail-header > .icon-btn:first-child {
     visibility: hidden;
 }
 
@@ -2254,6 +2194,9 @@ summary.menu-l2 .material-symbols-outlined {
     .sidebar {
         display: none;
     }
+    .semester-filter-mobile {
+        display: inline-block;
+    }
     .main-content {
         border-radius: 0;
         margin-top: 0;
@@ -2319,7 +2262,7 @@ summary.menu-l2 .material-symbols-outlined {
         flex: 1;
         margin-right: 8px;
     }
-    .detail-header .icon-btn:first-child {
+    #detail-header > .icon-btn:first-child {
         visibility: visible;
     }
 }
