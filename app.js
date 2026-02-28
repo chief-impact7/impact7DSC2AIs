@@ -24,6 +24,26 @@ function parseCSVLine(line) {
     return result;
 }
 
+// 학부별 학기 이름 목록
+const SEMESTER_NAMES = {
+    '초등': ['겨울', '봄1', '봄2', '여름', '가을'],
+    '중등': ['겨울', '봄', '여름', '가을'],
+    '고등': ['겨울', '봄', '가을'],
+};
+const DEFAULT_SEMESTER_NAMES = ['겨울', '봄', '여름', '가을'];
+
+// 학부 + 연도 기준으로 <option> 문자열 생성 (현재 연도 + 다음 연도)
+function getSemesterOptions(level, selectedSemester) {
+    const year = new Date().getFullYear();
+    const names = SEMESTER_NAMES[level] || DEFAULT_SEMESTER_NAMES;
+    return [year, year + 1].flatMap(y =>
+        names.map(name => {
+            const val = `${y}-${name}`;
+            return `<option value="${val}"${val === selectedSemester ? ' selected' : ''}>${val}</option>`;
+        })
+    ).join('');
+}
+
 let currentUser = null;
 let currentUserRole = null; // 'admin' | 'teacher' | null
 let currentStudentId = null;
@@ -291,6 +311,53 @@ async function loadStudentList() {
 }
 
 window.refreshStudents = loadStudentList;
+
+// ---------------------------------------------------------------------------
+// [임시] 학기 마이그레이션 — 브라우저 콘솔에서 한 번만 실행
+// 기존 enrollments에 semester 필드가 없으면 "2026winter" 추가
+// 사용법: 앱 로그인 후 콘솔에서 _migrateSemester() 실행
+// 완료 후 이 함수는 삭제해도 됨
+// ---------------------------------------------------------------------------
+window._migrateSemester = async () => {
+    if (!currentUser) { console.error('먼저 로그인하세요.'); return; }
+    console.log('마이그레이션 시작...');
+
+    const snap = await getDocs(collection(db, 'students'));
+    console.log(`전체 학생: ${snap.size}명`);
+
+    let needUpdate = 0, alreadyDone = 0, noEnroll = 0;
+    const BATCH_MAX = 400;
+    let batch = writeBatch(db);
+    let batchCount = 0;
+
+    for (const docSnap of snap.docs) {
+        const data = docSnap.data();
+        const enrollments = data.enrollments;
+        if (!enrollments?.length) { noEnroll++; continue; }
+
+        const needsFix = enrollments.some(e => !e.semester);
+        if (!needsFix) { alreadyDone++; continue; }
+
+        const updated = enrollments.map(e => ({ ...e, semester: e.semester || '2026winter' }));
+        batch.update(docSnap.ref, { enrollments: updated });
+        needUpdate++;
+        batchCount++;
+
+        if (batchCount >= BATCH_MAX) {
+            await batch.commit();
+            console.log(`  배치 완료 (${batchCount}건)`);
+            batch = writeBatch(db);
+            batchCount = 0;
+        }
+    }
+
+    if (batchCount > 0) await batch.commit();
+
+    console.log(`\n완료!`);
+    console.log(`  업데이트: ${needUpdate}명`);
+    console.log(`  이미 완료: ${alreadyDone}명`);
+    console.log(`  수업 없음: ${noEnroll}명`);
+};
 
 // ---------------------------------------------------------------------------
 // 일별 통계 스냅샷 (Daily Stats)
@@ -947,6 +1014,10 @@ window.showNewStudentForm = () => {
 
     if (window.handleStatusChange) window.handleStatusChange('재원');
 
+    // 학기 드롭다운 초기화 (기본 학부: 초등)
+    const initSemSelect = document.getElementById('initial-semester-select');
+    if (initSemSelect) initSemSelect.innerHTML = getSemesterOptions('초등', '');
+
     // 추가 수업 목록 초기화 + 버튼 표시
     _pendingEnrollments = [];
     renderPendingEnrollments();
@@ -955,6 +1026,12 @@ window.showNewStudentForm = () => {
         addEnrollBtn.style.display = 'flex';
         addEnrollBtn.onclick = window.openFormEnrollmentModal;
     }
+};
+
+// 학부 변경 시 학기 드롭다운 갱신
+window.handleLevelChange = (level) => {
+    const initSemSelect = document.getElementById('initial-semester-select');
+    if (initSemSelect) initSemSelect.innerHTML = getSemesterOptions(level, '');
 };
 
 window.handleStatusChange = (val) => {
@@ -1098,6 +1175,7 @@ window.submitNewStudent = async () => {
             class_number: classNumber,
             day: days,
             start_date: f.start_date.value,
+            semester: f.initial_semester?.value || '',
         };
         if (classType !== '정규' && f.special_end_date.value) {
             initialEnrollment.end_date = f.special_end_date.value;
@@ -1248,6 +1326,10 @@ window.openFormEnrollmentModal = () => {
     if (startLabel) startLabel.textContent = '등원일';
     const endInput = modal.querySelector('[name="enroll_end_date"]');
     applyDateConstraints(startInput, endInput);
+    // 학부에 맞는 학기 옵션 채우기
+    const level = document.getElementById('new-student-form')?.level?.value || '';
+    const semesterSelect = document.getElementById('enroll-semester-select');
+    if (semesterSelect) semesterSelect.innerHTML = getSemesterOptions(level, '');
     // 모달 데이터 속성으로 컨텍스트 표시 (form = 신규등록 폼에서 호출)
     modal.dataset.context = 'form';
     modal.style.display = 'flex';
@@ -1305,6 +1387,9 @@ function _rebuildEditEnrollmentCards() {
     if (!container) return;
     container.innerHTML = '';
 
+    const student = allStudents.find(s => s.id === currentStudentId);
+    const studentLevel = student?.level || '';
+
     _editEnrollments.forEach((e, idx) => {
         const code = enrollmentCode(e);
         const ct = e.class_type || '정규';
@@ -1357,6 +1442,12 @@ function _rebuildEditEnrollmentCards() {
                 <div class="form-field" style="display:${isRegular ? 'none' : 'block'}">
                     <label class="field-label">종료일</label>
                     <input class="field-input" data-field="end_date" data-idx="${idx}" type="date" value="${e.end_date || ''}">
+                </div>
+                <div class="form-field">
+                    <label class="field-label">학기</label>
+                    <select class="field-select" data-field="semester" data-idx="${idx}">
+                        ${getSemesterOptions(studentLevel, e.semester || '')}
+                    </select>
                 </div>
             </div>
         `;
@@ -1426,6 +1517,7 @@ function collectEditEnrollments() {
             class_number: get('class_number'),
             day: days,
             start_date: get('start_date'),
+            semester: get('semester'),
         };
         if (classType !== '정규') {
             const endDate = get('end_date');
@@ -1493,6 +1585,12 @@ window.openEnrollmentModal = () => {
     // 날짜 제한
     const endInput = modal.querySelector('[name="enroll_end_date"]');
     applyDateConstraints(startInput, endInput);
+    // 학부에 맞는 학기 옵션 채우기
+    const student = allStudents.find(s => s.id === currentStudentId);
+    const level = student?.level || '';
+    const semesterSelect = document.getElementById('enroll-semester-select');
+    if (semesterSelect) semesterSelect.innerHTML = getSemesterOptions(level, '');
+    modal.dataset.context = 'edit';
     modal.style.display = 'flex';
 };
 
@@ -1531,7 +1629,8 @@ window.saveEnrollment = async () => {
 
     if (!classNumber) { alert('반넘버를 입력하세요.'); return; }
 
-    const enrollment = { class_type: classType, level_symbol: levelSymbol, class_number: classNumber, day: days, start_date: startDate };
+    const semester = form.enroll_semester?.value || '';
+    const enrollment = { class_type: classType, level_symbol: levelSymbol, class_number: classNumber, day: days, start_date: startDate, semester };
     if (classType !== '정규' && endDate) enrollment.end_date = endDate;
 
     // 신규등록 폼에서 호출된 경우 → 로컬 배열에 추가

@@ -471,7 +471,8 @@
                                     </div>
                                     <div class="form-field">
                                         <label class="field-label">학부</label>
-                                        <select class="field-select" name="level">
+                                        <select class="field-select" name="level"
+                                            onchange="window.handleLevelChange && window.handleLevelChange(this.value)">
                                             <option value="초등">초등</option>
                                             <option value="중등">중등</option>
                                             <option value="고등">고등</option>
@@ -589,6 +590,10 @@
                                             <label class="field-label">종료일</label>
                                             <input class="field-input" name="special_end_date" type="date">
                                         </div>
+                                        <div class="form-field">
+                                            <label class="field-label">학기</label>
+                                            <select class="field-select" name="initial_semester" id="initial-semester-select"></select>
+                                        </div>
                                     </div>
 
                                     <!-- 수정 시 동적 enrollment 카드 -->
@@ -683,6 +688,10 @@
                     <div class="form-field" id="enroll-special-period" style="display:none;">
                         <label class="field-label">종료일</label>
                         <input class="field-input" name="enroll_end_date" type="date">
+                    </div>
+                    <div class="form-field">
+                        <label class="field-label">학기</label>
+                        <select class="field-select" name="enroll_semester" id="enroll-semester-select"></select>
                     </div>
                 </div>
             </form>

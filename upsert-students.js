@@ -51,8 +51,11 @@ const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
 const fileIdx = args.indexOf('--file');
 const csvFileName = fileIdx !== -1 && args[fileIdx + 1] ? args[fileIdx + 1] : 'students.csv';
+const semIdx = args.indexOf('--semester');
+const SEMESTER = semIdx !== -1 && args[semIdx + 1] ? args[semIdx + 1] : '2026-봄1';
 
 if (DRY_RUN) console.log('🔍 DRY RUN 모드 — Firestore에 쓰지 않습니다.\n');
+console.log(`학기: ${SEMESTER}\n`);
 
 // --- Firebase Admin init ---
 // Priority: 1) service-account.json  2) GOOGLE_APPLICATION_CREDENTIALS env var
@@ -232,7 +235,8 @@ async function upsertStudents() {
             level_symbol: raw['학부기호'] || '',
             class_number: classNumber,
             day: dayArr,
-            start_date: raw['시작일'] || ''
+            start_date: raw['시작일'] || '',
+            semester: raw['학기'] || SEMESTER,
         };
 
         if (!studentMap[docId]) {
