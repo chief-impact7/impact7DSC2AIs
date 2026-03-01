@@ -21,7 +21,7 @@
         <ol class="help-guide-steps">
           <li>우측 상단의 <strong>G</strong> 아바타를 클릭합니다.</li>
           <li>Google 계정으로 로그인합니다. (승인된 계정만 접속 가능)</li>
-          <li>로그인에 성공하면 아바타가 프로필 사진으로 바뀌고, 학생 목록이 로드됩니다.</li>
+          <li>로그인에 성공하면 아바타가 이메일 첫 글자로 바뀌고, 학생 목록이 로드됩니다.</li>
         </ol>
       </section>
 
@@ -57,8 +57,8 @@
           뷰 전환
         </h3>
         <p class="help-guide-desc">
-          상단 뷰 전환 버튼으로 <strong>목록 뷰</strong>와 <strong>그룹 뷰</strong>를 전환할 수 있습니다.
-          목록 뷰는 학생을 리스트 형태로, 그룹 뷰는 반별로 묶어서 보여줍니다.
+          상단 뷰 전환 버튼으로 <strong>기본 목록</strong>, <strong>소속별 그룹</strong>, <strong>반별 그룹</strong> 뷰를 순환 전환할 수 있습니다.
+          기본 목록은 리스트 형태로, 소속별/반별 그룹은 각각 지점 또는 반 단위로 묶어서 보여줍니다.
         </p>
       </section>
     `;
@@ -109,7 +109,7 @@
           메모 관리
         </h3>
         <ul class="help-guide-list">
-          <li><strong>메모 추가</strong> &mdash; 학생 상세 패널 하단의 <span class="material-symbols-outlined" style="font-size:18px;vertical-align:middle;">add</span> 버튼으로 새 메모를 작성합니다.</li>
+          <li><strong>메모 추가</strong> &mdash; 메모 카드 제목 옆의 <span class="material-symbols-outlined" style="font-size:18px;vertical-align:middle;">add</span> 버튼을 클릭하면 메모 작성 모달이 열립니다.</li>
           <li><strong>메모 삭제</strong> &mdash; 각 메모의 <span class="material-symbols-outlined" style="font-size:18px;vertical-align:middle;">close</span> 버튼으로 삭제합니다.</li>
         </ul>
       </section>
@@ -134,10 +134,10 @@
         </h3>
         <p class="help-guide-desc">다양한 방식으로 학생 데이터를 일괄 업로드할 수 있습니다.</p>
         <ul class="help-guide-list">
-          <li><strong>Google Drive</strong> &mdash; 드라이브에 저장된 스프레드시트 연동</li>
+          <li><strong>드라이브에서 선택</strong> &mdash; Google Picker로 내 드라이브에서 구글시트 파일을 직접 선택</li>
           <li><strong>URL</strong> &mdash; 공유된 스프레드시트 URL 입력</li>
           <li><strong>CSV 파일</strong> &mdash; CSV 파일 직접 업로드</li>
-          <li><strong>템플릿</strong> &mdash; 업로드 양식 템플릿을 다운로드한 후 작성하여 업로드</li>
+          <li><strong>템플릿</strong> &mdash; 내 구글 드라이브에 업로드 양식 템플릿이 생성됩니다. 데이터를 입력한 후 URL 또는 드라이브에서 선택으로 가져옵니다.</li>
         </ul>
       </section>
 
@@ -147,8 +147,8 @@
           구글시트 다운로드
         </h3>
         <p class="help-guide-desc">
-          현재 보고 있는 학생 데이터를 구글 스프레드시트(CSV)로 다운로드할 수 있습니다.
-          데이터 백업이나 외부 공유가 필요할 때 사용하세요.
+          전체 학생 데이터를 구글 스프레드시트로 내보냅니다.
+          내 구글 드라이브에 새 시트가 생성되어 자동으로 열립니다. 데이터 백업이나 외부 공유가 필요할 때 사용하세요.
         </p>
       </section>
     `;
@@ -163,7 +163,7 @@
         </h3>
         <p class="help-guide-desc">
           사이드바 최상단의 드롭다운에서 학기를 선택합니다. 선택한 학기는 브라우저에 저장되어
-          다음 접속 시에도 유지됩니다. "전체 학기"를 선택하면 모든 학기의 학생을 볼 수 있습니다.
+          다음 접속 시에도 유지됩니다. "전체 학기"를 선택하면 학기에 관계없이 모든 학생을 볼 수 있습니다.
         </p>
       </section>
 
@@ -216,7 +216,7 @@
           <li><strong>10단지</strong> &mdash; 10단지 지점 학생</li>
         </ul>
         <p class="help-guide-desc" style="margin-top:8px;">
-          지점은 레벨기호의 첫 자리 숫자로 자동 결정됩니다. (1 &rarr; 2단지, 2 &rarr; 10단지)
+          지점은 반넘버의 첫 자리 숫자로 자동 결정됩니다. (1xx &rarr; 2단지, 2xx &rarr; 10단지)
         </p>
       </section>
 
@@ -288,7 +288,7 @@
       },
       {
         q: '데이터 백업은 어떻게 하나요?',
-        a: '상단 메뉴의 <strong>구글시트 다운로드</strong> 기능을 사용하세요. 현재 화면에 표시된 학생 데이터가 CSV(스프레드시트) 파일로 다운로드됩니다. 정기적으로 백업해 두는 것을 권장합니다.',
+        a: '상단의 <strong>구글시트로 다운로드</strong> 버튼을 사용하세요. 전체 학생 데이터가 내 구글 드라이브에 새 스프레드시트로 생성됩니다. 정기적으로 백업해 두는 것을 권장합니다.',
       },
       {
         q: '휴원 학생은 어떻게 관리하나요?',
@@ -331,7 +331,7 @@
     const tabsHTML = TABS.map(
       (t, i) => `
       <button class="help-guide-tab${i === 0 ? ' help-guide-tab--active' : ''}"
-              data-tab="${t.id}" role="tab" aria-selected="${i === 0}">
+              id="help-tab-${t.id}" data-tab="${t.id}" role="tab" aria-selected="${i === 0}">
         <span class="material-symbols-outlined">${t.icon}</span>
         <span>${t.label}</span>
       </button>`
@@ -349,7 +349,7 @@
           </button>
         </header>
         <nav class="help-guide-tabs" role="tablist">${tabsHTML}</nav>
-        <div class="help-guide-body" role="tabpanel"></div>
+        <div class="help-guide-body" role="tabpanel" aria-labelledby="help-tab-basics"></div>
       </div>
     `;
 
@@ -375,8 +375,11 @@
       btn.classList.toggle('help-guide-tab--active', isActive);
       btn.setAttribute('aria-selected', isActive);
     });
+    overlayEl.querySelector('.help-guide-body').setAttribute('aria-labelledby', `help-tab-${tabId}`);
     renderContent();
   }
+
+  let _previousFocus = null;
 
   function openModal() {
     if (!overlayEl) {
@@ -397,6 +400,7 @@
       });
     }
 
+    _previousFocus = document.activeElement;
     activeTab = TABS[0].id;
     switchTab(activeTab);
     overlayEl.classList.add('help-guide-overlay--visible');
@@ -408,6 +412,7 @@
     if (!overlayEl) return;
     overlayEl.classList.remove('help-guide-overlay--visible');
     document.body.style.overflow = '';
+    if (_previousFocus) { _previousFocus.focus(); _previousFocus = null; }
   }
 
   /* ── Keyboard ──────────────────────────────────────────────────────── */
@@ -452,7 +457,7 @@
 
       /* ── Modal ── */
       .help-guide-modal {
-        background: #fff;
+        background: var(--surface-container, #fff);
         border-radius: 16px;
         width: min(640px, calc(100vw - 32px));
         max-height: calc(100vh - 64px);
@@ -647,7 +652,7 @@
       @media (max-width: 600px) {
         .help-guide-modal {
           width: 100vw;
-          max-height: 100vh;
+          max-height: 100dvh;
           border-radius: 0;
         }
         .help-guide-tabs {
