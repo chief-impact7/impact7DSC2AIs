@@ -922,9 +922,31 @@ document.querySelectorAll('.sidebar > details.l1-group').forEach(details => {
 // ---------------------------------------------------------------------------
 // 검색 입력 debounce (200ms) — 매 키 입력마다 전체 렌더링 방지
 let _searchDebounceTimer = null;
-document.getElementById('studentSearchInput')?.addEventListener('input', () => {
+const _searchInput = document.getElementById('studentSearchInput');
+const _searchClearBtn = document.getElementById('searchClearBtn');
+
+function _toggleSearchClear() {
+    _searchClearBtn?.classList.toggle('visible', _searchInput.value.length > 0);
+}
+
+_searchInput?.addEventListener('input', () => {
+    _toggleSearchClear();
     clearTimeout(_searchDebounceTimer);
     _searchDebounceTimer = setTimeout(applyFilterAndRender, 200);
+});
+
+_searchClearBtn?.addEventListener('click', () => {
+    _searchInput.value = '';
+    _toggleSearchClear();
+    _searchInput.focus();
+    applyFilterAndRender();
+});
+
+_searchClearBtn?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        _searchClearBtn.click();
+    }
 });
 
 // ---------------------------------------------------------------------------

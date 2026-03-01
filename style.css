@@ -129,6 +129,26 @@ body {
     box-shadow: 0 2px 0 0 var(--primary);
 }
 
+.search-clear-btn {
+    font-size: 20px;
+    color: var(--text-sub);
+    cursor: pointer;
+    display: none;
+    flex-shrink: 0;
+    border-radius: 50%;
+    padding: 2px;
+    transition: background 0.15s;
+}
+
+.search-clear-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--text-main);
+}
+
+.search-clear-btn.visible {
+    display: flex;
+}
+
 .avatar {
     background: var(--primary);
     color: white;
