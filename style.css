@@ -75,6 +75,11 @@ body {
     background-color: rgba(60, 64, 67, 0.08);
 }
 
+.icon-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
 .logo {
     display: flex;
     align-items: center;
@@ -113,11 +118,15 @@ body {
 .search-box input {
     background: transparent;
     border: none;
-    outline: none;
     font-size: 16px;
     font-family: var(--font-body);
     width: 100%;
     margin-left: 12px;
+}
+
+.search-box input:focus-visible {
+    outline: none;
+    box-shadow: 0 2px 0 0 var(--primary);
 }
 
 .avatar {
@@ -198,6 +207,11 @@ body {
     background-color: var(--hover-bg);
 }
 
+.nav-item:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+}
+
 .nav-item.active {
     background-color: var(--active-bg);
     color: var(--active-text);
@@ -263,6 +277,11 @@ body {
     color: var(--active-text);
 }
 
+summary.menu-l1:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+}
+
 /* L2: sub-menu — toggle header (상태, 수업종류) 또는 filter item (초등, 2단지, 월요일…) */
 .menu-l2 {
     list-style: none;
@@ -306,6 +325,16 @@ summary.menu-l2::after {
 .l2-group[open] > summary.menu-l2 {
     background: var(--primary-light);
     color: var(--primary);
+}
+
+summary.menu-l2:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+}
+
+/* 모든 summary 요소의 focus-visible 일관성 보장 */
+summary:focus-visible {
+    outline-offset: -2px;
 }
 
 /* L2 summary 안의 아이콘 크기 */
@@ -431,9 +460,9 @@ summary.menu-l2 .material-symbols-outlined {
     -webkit-appearance: none;
 }
 
-.semester-select:focus {
-    outline: none;
-    border-color: var(--primary);
+.semester-select:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
 }
 
 .filter-chips {
@@ -467,9 +496,9 @@ summary.menu-l2 .material-symbols-outlined {
     flex-shrink: 0;
 }
 
-.semester-filter-mobile:focus {
-    outline: none;
-    border-color: var(--primary);
+.semester-filter-mobile:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
 }
 
 .filter-clear-btn {
@@ -761,6 +790,23 @@ summary.menu-l2 .material-symbols-outlined {
     background: var(--surface-hover);
 }
 
+/* 공통 버튼 포커스 스타일 */
+.compose-btn:focus-visible,
+.btn-save:focus-visible,
+.btn-cancel:focus-visible,
+.upload-method-btn:focus-visible,
+.btn-end-class-confirm:focus-visible,
+.btn-add-enrollment:focus-visible,
+.memo-add-btn:focus-visible,
+.bulk-btn-close:focus-visible,
+.home-shortcut-btn:focus-visible,
+.filter-clear-btn:focus-visible,
+.bulk-apply-btn:focus-visible,
+.bulk-reset-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+}
+
 .form-grid {
     display: flex;
     flex-direction: column;
@@ -848,8 +894,13 @@ summary.menu-l2 .material-symbols-outlined {
     font-family: var(--font-body);
     color: var(--text-main);
     padding: 4px 0;
-    outline: none;
     transition: border-color 0.2s;
+}
+
+.field-input:focus-visible,
+.field-select:focus-visible {
+    outline: none;
+    border-bottom-color: var(--primary);
 }
 
 .field-input:focus,
@@ -869,6 +920,7 @@ summary.menu-l2 .material-symbols-outlined {
 }
 
 .day-check {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -890,7 +942,15 @@ summary.menu-l2 .material-symbols-outlined {
 }
 
 .day-check input {
-    display: none;
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.day-check:has(input:focus-visible) {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
 }
 
 .day-dot {
@@ -1049,6 +1109,11 @@ summary.menu-l2 .material-symbols-outlined {
     background: var(--hover-bg);
 }
 
+.tab-btn:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: -2px;
+}
+
 .tab-btn.active {
     color: var(--primary);
     border-bottom-color: var(--primary);
@@ -1101,9 +1166,13 @@ summary.menu-l2 .material-symbols-outlined {
     font-family: var(--font-body);
     color: var(--text-main);
     resize: vertical;
-    outline: none;
     transition: border-color 0.2s;
     line-height: 1.6;
+}
+
+.modal-textarea:focus-visible {
+    outline: none;
+    border-color: var(--primary);
 }
 
 .modal-textarea:focus {

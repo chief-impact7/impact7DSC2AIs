@@ -1,5 +1,5 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, collectionGroup, getDocs, getDoc, doc, setDoc, addDoc, deleteDoc, serverTimestamp, query, where, orderBy, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, setDoc, addDoc, deleteDoc, serverTimestamp, query, where, orderBy, writeBatch } from 'firebase/firestore';
 import { auth, db } from './firebase-config.js';
 import { signInWithGoogle, logout, getGoogleAccessToken } from './auth.js';
 
@@ -26,7 +26,7 @@ function parseCSVLine(line) {
 
 // 학부별 학기 이름 목록
 const SEMESTER_NAMES = {
-    '초등': ['Winter', 'Spring1', 'Spring2', 'Summer', 'Autumn'],
+    '초등': ['Winter', 'Spring', 'Summer', 'Autumn'],
     '중등': ['Winter', 'Spring', 'Summer', 'Autumn'],
     '고등': ['Winter', 'Spring', 'Autumn'],
 };
@@ -428,20 +428,9 @@ function buildSiblingMap() {
 // ---------------------------------------------------------------------------
 async function loadMemoCacheAndRender() {
     memoCache = {};
-    // 먼저 목록을 바로 렌더
+    // allStudents의 has_memo 필드로 캐시 구성 (추가 쿼리 0건)
+    allStudents.forEach(s => { if (s.has_memo) memoCache[s.id] = true; });
     applyFilterAndRender();
-    // 백그라운드에서 메모 존재 여부 확인 후 아이콘 업데이트 (collectionGroup으로 1회 쿼리)
-    try {
-        const memoSnap = await getDocs(collectionGroup(db, 'memos'));
-        memoSnap.forEach(d => {
-            const parentId = d.ref.parent.parent.id;
-            memoCache[parentId] = true;
-        });
-        // 메모 아이콘 업데이트를 위해 다시 렌더
-        applyFilterAndRender();
-    } catch (e) {
-        console.warn('[MEMO CACHE] Failed to load memo cache:', e);
-    }
 }
 
 // 개별 리스트 아이템의 아이콘만 업데이트 (전체 리렌더 없이)
@@ -922,7 +911,12 @@ document.querySelectorAll('.sidebar > details.l1-group').forEach(details => {
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
-document.getElementById('studentSearchInput')?.addEventListener('input', applyFilterAndRender);
+// 검색 입력 debounce (200ms) — 매 키 입력마다 전체 렌더링 방지
+let _searchDebounceTimer = null;
+document.getElementById('studentSearchInput')?.addEventListener('input', () => {
+    clearTimeout(_searchDebounceTimer);
+    _searchDebounceTimer = setTimeout(applyFilterAndRender, 200);
+});
 
 // ---------------------------------------------------------------------------
 // Select a student — populate detail panel
@@ -1180,10 +1174,14 @@ window.submitNewStudent = async () => {
             parent_phone_2: f.parent_phone_2.value.trim(),
             branch,
             status: f.status.value,
-            pause_start_date: f.pause_start_date.value,
-            pause_end_date: f.pause_end_date.value,
             enrollments: updatedEnrollments,
         };
+        // 휴원 상태일 때만 휴원 날짜 저장, 아니면 기존 값 유지
+        const statusVal = f.status.value;
+        if (statusVal === '실휴원' || statusVal === '가휴원') {
+            studentData.pause_start_date = f.pause_start_date.value;
+            studentData.pause_end_date = f.pause_end_date.value;
+        }
     } else {
         // 신규 등록: 첫 enrollment 포함
         const classNumber = f.class_number.value.trim();
@@ -1220,10 +1218,15 @@ window.submitNewStudent = async () => {
             parent_phone_2: f.parent_phone_2.value.trim(),
             branch,
             status: f.status.value,
-            pause_start_date: f.pause_start_date.value,
-            pause_end_date: f.pause_end_date.value,
+            pause_start_date: '',
+            pause_end_date: '',
             enrollments: allEnrollments,
         };
+        // 휴원 상태일 때만 휴원 날짜 저장
+        if (f.status.value === '실휴원' || f.status.value === '가휴원') {
+            studentData.pause_start_date = f.pause_start_date.value;
+            studentData.pause_end_date = f.pause_end_date.value;
+        }
     }
 
     const saveBtn = document.getElementById('save-btn');
@@ -2191,8 +2194,8 @@ window.handleSheetTemplate = async () => {
                 mkList(10, 11, ['정규', '특강', '내신'], true),
                 mkList(14, 15, ['등원예정', '재원', '실휴원', '가휴원', '퇴원'], true),
                 mkList(17, 18, [
-                    '2026-Winter','2026-Spring1','2026-Spring2','2026-Summer','2026-Autumn','2026-Spring',
-                    '2027-Winter','2027-Spring1','2027-Spring2','2027-Summer','2027-Autumn','2027-Spring'
+                    '2026-Winter','2026-Spring','2026-Summer','2026-Autumn',
+                    '2027-Winter','2027-Spring','2027-Summer','2027-Autumn'
                 ], false),
                 mkDate(11), mkDate(12), mkDate(15), mkDate(16),
                 { autoResizeDimensions: { dimensions: { sheetId: sid, dimension: 'COLUMNS', startIndex: 0, endIndex: TMPL_HEADERS.length } } }
@@ -2409,6 +2412,7 @@ async function runUpsertFromRows(rows, sourceName) {
                 branch, status: raw['상태'] || '재원',
                 pause_start_date: raw['휴원시작일'] || '',
                 pause_end_date: raw['휴원종료일'] || '',
+                has_memo: false,
                 enrollments: []
             };
         }
@@ -2425,7 +2429,7 @@ async function runUpsertFromRows(rows, sourceName) {
     }
 
     // 4) Compare and classify
-    const infoFields = ['name', 'level', 'school', 'grade', 'student_phone', 'parent_phone_1', 'parent_phone_2', 'branch', 'status'];
+    const infoFields = ['name', 'level', 'school', 'grade', 'student_phone', 'parent_phone_1', 'parent_phone_2', 'branch', 'status', 'pause_start_date', 'pause_end_date'];
 
     const results = { inserted: [], updated: [], skipped: [] };
     const writes = [];
@@ -2683,7 +2687,12 @@ window.deleteMemo = async (studentId, memoId) => {
         await deleteDoc(doc(db, 'students', studentId, 'memos', memoId));
         // 메모 캐시 업데이트: 남은 메모가 있는지 확인
         const remaining = await getDocs(collection(db, 'students', studentId, 'memos'));
-        if (remaining.empty) { delete memoCache[studentId]; }
+        if (remaining.empty) {
+            delete memoCache[studentId];
+            await setDoc(doc(db, 'students', studentId), { has_memo: false }, { merge: true });
+            const st = allStudents.find(s => s.id === studentId);
+            if (st) st.has_memo = false;
+        }
         updateListItemIcons(studentId);
         await loadMemos(studentId);
     } catch (e) {
@@ -2717,12 +2726,19 @@ window.saveMemoFromModal = async () => {
     if (!currentStudentId) return;
     const ctx = _memoModalContext;
     try {
-        await addDoc(collection(db, 'students', currentStudentId, 'memos'), {
+        const batch = writeBatch(db);
+        const memoRef = doc(collection(db, 'students', currentStudentId, 'memos'));
+        batch.set(memoRef, {
             text,
             created_at: serverTimestamp(),
             author: currentUser?.email || 'system',
         });
+        // 학생 문서에 has_memo 플래그 설정 (메모 생성과 원자적으로 처리)
+        batch.set(doc(db, 'students', currentStudentId), { has_memo: true }, { merge: true });
+        await batch.commit();
         memoCache[currentStudentId] = true;
+        const st = allStudents.find(s => s.id === currentStudentId);
+        if (st) st.has_memo = true;
         updateListItemIcons(currentStudentId);
         document.getElementById('memo-modal').style.display = 'none';
         _memoModalContext = null;
@@ -2791,6 +2807,15 @@ window.deleteFormMemo = async (studentId, memoId) => {
     if (!confirm('이 메모를 삭제하시겠습니까?')) return;
     try {
         await deleteDoc(doc(db, 'students', studentId, 'memos', memoId));
+        // 남은 메모 없으면 has_memo 해제
+        const remaining = await getDocs(collection(db, 'students', studentId, 'memos'));
+        if (remaining.empty) {
+            delete memoCache[studentId];
+            await setDoc(doc(db, 'students', studentId), { has_memo: false }, { merge: true });
+            const st = allStudents.find(s => s.id === studentId);
+            if (st) st.has_memo = false;
+            updateListItemIcons(studentId);
+        }
         await loadFormMemos(studentId);
     } catch (e) {
         alert('삭제 실패: ' + e.message);
@@ -3536,3 +3561,4 @@ function renderStatsView(data, container) {
         document.addEventListener('mouseup', onMouseUp);
     });
 })();
+

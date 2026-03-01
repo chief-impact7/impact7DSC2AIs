@@ -46,7 +46,8 @@ service cloud.firestore {
           'branch', 'status', 'enrollments',
           'pause_start_date', 'pause_end_date',
           'day', 'class_type', 'level_code', 'level_symbol', 'class_number',
-          'start_date', 'special_start_date', 'special_end_date'
+          'start_date', 'special_start_date', 'special_end_date',
+          'has_memo'
         ];
         return request.resource.data.keys().hasOnly(allowed);
       }
