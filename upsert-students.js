@@ -259,6 +259,7 @@ async function upsertStudents() {
                 guardian_name_2: raw['guardian_name_2'] || raw['보호자명2'] || '',
                 branch,
                 status: raw['status'] || raw['상태'] || '재원',
+                first_registered: raw['first_registered'] || raw['첫등록일'] || '',
                 enrollments: []
             };
         }

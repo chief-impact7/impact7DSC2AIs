@@ -38,7 +38,7 @@ const STUDENT_SHEET_HEADERS = [
     'parent_phone_1', 'parent_phone_2', 'guardian_name_1', 'guardian_name_2',
     'branch', 'level_symbol', 'class_number',
     'class_type', 'start_date', 'end_date', 'day',
-    'status', 'pause_start_date', 'pause_end_date', 'semester'
+    'status', 'pause_start_date', 'pause_end_date', 'semester', 'first_registered'
 ];
 
 // semester를 제외한 필터가 하나라도 활성화되어 있는지 확인
@@ -2308,7 +2308,7 @@ window.handleSheetExport = async () => {
                 s.student_phone || '', s.parent_phone_1 || '', s.parent_phone_2 || '',
                 s.guardian_name_1 || '', s.guardian_name_2 || '',
                 branch, '', '', '정규', '', '', '',
-                s.status || '재원', s.pause_start_date || '', s.pause_end_date || '', ''
+                s.status || '재원', s.pause_start_date || '', s.pause_end_date || '', '', s.first_registered || ''
             ]);
         } else {
             enrollments.forEach(e => {
@@ -2320,7 +2320,7 @@ window.handleSheetExport = async () => {
                     branch,
                     e.level_symbol || '', e.class_number || '', e.class_type || '정규',
                     e.start_date || '', e.end_date || '', dayStr,
-                    s.status || '재원', s.pause_start_date || '', s.pause_end_date || '', e.semester || ''
+                    s.status || '재원', s.pause_start_date || '', s.pause_end_date || '', e.semester || '', s.first_registered || ''
                 ]);
             });
         }
@@ -2565,6 +2565,7 @@ async function importFromSheetId(sheetId, sheetName) {
             'class_type': 'class_type', 'start_date': 'start_date', 'end_date': 'end_date',
             'day': 'day', 'status': 'status',
             'pause_start_date': 'pause_start_date', 'pause_end_date': 'pause_end_date', 'semester': 'semester',
+            'first_registered': 'first_registered',
             // Korean (backward compat)
             '이름': 'name', '학부': 'level', '학교': 'school', '학년': 'grade',
             '학생연락처': 'student_phone', '학부모연락처1': 'parent_phone_1', '학부모연락처2': 'parent_phone_2',
@@ -2573,6 +2574,7 @@ async function importFromSheetId(sheetId, sheetName) {
             '수업종류': 'class_type', '시작일': 'start_date', '종료일': 'end_date',
             '요일': 'day', '상태': 'status',
             '휴원시작일': 'pause_start_date', '휴원종료일': 'pause_end_date', '학기': 'semester',
+            '첫등록일': 'first_registered',
         };
 
         const rows = sheetRows.slice(1).map(row => {
@@ -2646,6 +2648,7 @@ async function runCsvUpsert(csvText, fileName) {
         end_date: raw['end_date'] || raw['종료일'] || '',
         pause_start_date: raw['pause_start_date'] || raw['휴원시작일'] || '',
         pause_end_date: raw['pause_end_date'] || raw['휴원종료일'] || '',
+        first_registered: raw['first_registered'] || raw['첫등록일'] || '',
     }));
 
     await runUpsertFromRows(normalized, fileName);
@@ -2695,6 +2698,7 @@ async function runUpsertFromRows(rows, sourceName) {
                 branch, status: raw['status'] || raw['상태'] || '재원',
                 pause_start_date: raw['pause_start_date'] || raw['휴원시작일'] || '',
                 pause_end_date: raw['pause_end_date'] || raw['휴원종료일'] || '',
+                first_registered: raw['first_registered'] || raw['첫등록일'] || '',
                 has_memo: false,
                 enrollments: []
             };
@@ -2712,7 +2716,7 @@ async function runUpsertFromRows(rows, sourceName) {
     }
 
     // 4) Compare and classify
-    const infoFields = ['name', 'level', 'school', 'grade', 'student_phone', 'parent_phone_1', 'parent_phone_2', 'guardian_name_1', 'guardian_name_2', 'branch', 'status', 'pause_start_date', 'pause_end_date'];
+    const infoFields = ['name', 'level', 'school', 'grade', 'student_phone', 'parent_phone_1', 'parent_phone_2', 'guardian_name_1', 'guardian_name_2', 'branch', 'status', 'pause_start_date', 'pause_end_date', 'first_registered'];
 
     const results = { inserted: [], updated: [], skipped: [] };
     const writes = [];
