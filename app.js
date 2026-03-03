@@ -77,6 +77,7 @@ let memoCache = {};     // studentId → true/false (메모 존재 여부)
 let semesterSettings = {};   // semester → { start_date }
 let currentSemester = null;  // 오늘 기준 현재 학기
 let currentFilteredStudents = null; // 필터 적용 후 학생 목록 (내보내기용)
+let allContacts = []; // contacts 컬렉션 캐시
 
 // HTML 이스케이프 — 사용자 입력을 innerHTML에 삽입할 때 XSS 방지
 const esc = (str) => {
@@ -328,6 +329,7 @@ onAuthStateChanged(auth, async (user) => {
         await loadSemesterSettings();
         getCurrentSemester();
         loadStudentList();
+        loadContacts();
     } else {
         currentUser = null;
         currentUserRole = null;
@@ -392,6 +394,22 @@ async function loadStudentList() {
 }
 
 window.refreshStudents = loadStudentList;
+
+// ---------------------------------------------------------------------------
+// contacts 컬렉션 로딩
+// ---------------------------------------------------------------------------
+async function loadContacts() {
+    try {
+        const snapshot = await getDocs(collection(db, 'contacts'));
+        allContacts = [];
+        snapshot.forEach((docSnap) => {
+            allContacts.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        allContacts.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+    } catch (error) {
+        console.error('[FIRESTORE ERROR] Failed to load contacts:', error);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // 일별 통계 스냅샷 (Daily Stats)
@@ -704,6 +722,7 @@ function applyFilterAndRender() {
     }
 
     const term = document.getElementById('studentSearchInput')?.value.trim().toLowerCase() || '';
+    let contactResults = [];
     if (term) {
         const chosungMode = isChosungOnly(term);
         filtered = filtered.filter(s => {
@@ -719,11 +738,24 @@ function applyFilterAndRender() {
                 (s.parent_phone_1 && s.parent_phone_1.includes(term)) ||
                 allClassCodes(s).some(code => code.toLowerCase().includes(term));
         });
+
+        // contacts에서도 검색 (students에 없는 항목만)
+        const studentIdSet = new Set(allStudents.map(s => s.id));
+        contactResults = allContacts.filter(c => {
+            if (studentIdSet.has(c.id)) return false; // 이미 학생 목록에 있음
+            if (chosungMode) {
+                return matchChosung(c.name, term) || matchChosung(c.school, term);
+            }
+            return (c.name && c.name.toLowerCase().includes(term)) ||
+                (c.school && c.school.toLowerCase().includes(term)) ||
+                (c.student_phone && c.student_phone.includes(term)) ||
+                (c.parent_phone_1 && c.parent_phone_1.includes(term));
+        });
     }
 
     currentFilteredStudents = filtered;
     updateFilterChips();
-    renderStudentList(filtered);
+    renderStudentList(filtered, contactResults);
 }
 
 // 활성 필터 요약을 카운트 칩 옆에 표시
@@ -888,22 +920,28 @@ function buildSemesterFilter() {
     }
 }
 
-function renderStudentList(students) {
+function renderStudentList(students, contactResults) {
     const listContainer = document.querySelector('.list-items');
     listContainer.innerHTML = '';
     updateCount(students.length);
 
-    if (students.length === 0) {
+    const hasContacts = contactResults && contactResults.length > 0;
+
+    if (students.length === 0 && !hasContacts) {
         listContainer.innerHTML = '<p style="padding:16px;color:var(--text-sec)">No matches found.</p>';
         return;
     }
 
     if (groupViewMode !== 'none') {
         renderGroupedList(students, listContainer);
+        // 그룹 모드에서도 contacts 표시
+        if (hasContacts) renderContactResults(contactResults, listContainer);
         return;
     }
 
     students.forEach(s => renderStudentItem(s, listContainer));
+
+    if (hasContacts) renderContactResults(contactResults, listContainer);
 }
 
 function renderStudentItem(s, container) {
@@ -981,6 +1019,49 @@ function renderStudentItem(s, container) {
         selectStudent(s.id, s, e.currentTarget);
     });
     container.appendChild(div);
+}
+
+function renderContactResults(contacts, container) {
+    // 구분 헤더
+    const header = document.createElement('div');
+    header.className = 'group-header';
+    header.innerHTML = `<span class="group-label">과거 연락처</span><span class="group-count">${contacts.length}명</span>`;
+    container.appendChild(header);
+
+    contacts.forEach(c => {
+        const div = document.createElement('div');
+        div.className = 'list-item contact-item';
+        div.dataset.contactId = c.id;
+        const schoolShort = abbreviateSchool(c);
+        const phone = c.parent_phone_1 || c.student_phone || '';
+        const last4 = phone.replace(/\D/g, '').slice(-4);
+        const sub = [schoolShort !== '—' ? schoolShort : '', last4 ? `☎${last4}` : ''].filter(Boolean).join(' · ');
+
+        div.innerHTML = `
+            <span class="material-symbols-outlined drag-icon" style="color:var(--text-sec)">person_off</span>
+            <div class="item-main">
+                <span class="item-title">${esc(c.name || '—')}<span class="item-status st-contact">과거</span></span>
+                <span class="item-desc">${esc(sub || '—')}</span>
+            </div>
+        `;
+        div.addEventListener('click', () => {
+            // 등록 폼에 자동채움
+            window.showNewStudentForm();
+            setTimeout(() => {
+                const f = document.getElementById('new-student-form');
+                if (!f) return;
+                f.name.value = c.name || '';
+                if (c.level) f.level.value = c.level;
+                if (c.school) f.school.value = c.school;
+                if (c.grade) f.grade.value = c.grade;
+                if (c.student_phone) f.student_phone.value = c.student_phone;
+                if (c.parent_phone_1) f.parent_phone_1.value = c.parent_phone_1;
+                if (c.parent_phone_2) f.parent_phone_2.value = c.parent_phone_2;
+                if (c.level && window.handleLevelChange) window.handleLevelChange(c.level);
+            }, 50);
+        });
+        container.appendChild(div);
+    });
 }
 
 function renderGroupedList(students, container) {
@@ -1138,6 +1219,58 @@ _searchClearBtn?.addEventListener('keydown', (e) => {
         _searchClearBtn.click();
     }
 });
+
+// ---------------------------------------------------------------------------
+// 등록 폼: 이름 + 전화번호로 contacts 자동채움
+// ---------------------------------------------------------------------------
+{
+    const _form = document.getElementById('new-student-form');
+    const _nameInput = _form?.querySelector('[name="name"]');
+    const _phoneInput = _form?.querySelector('[name="parent_phone_1"]');
+    let _lastFilledDocId = null; // 중복 채움 방지
+
+    function _tryContactAutofill() {
+        if (isEditMode) return;
+        const name = _nameInput?.value.trim();
+        const phone = _phoneInput?.value.trim();
+        if (!name || !phone) return;
+
+        const docId = makeDocId(name, phone);
+        if (docId === _lastFilledDocId) return;
+
+        const contact = allContacts.find(c => c.id === docId);
+        if (!contact) return;
+
+        _lastFilledDocId = docId;
+        // contact 정보로 빈 필드 채움
+        if (contact.level) _form.level.value = contact.level;
+        if (contact.school && !_form.school.value) _form.school.value = contact.school;
+        if (contact.grade && !_form.grade.value) _form.grade.value = contact.grade;
+        if (contact.student_phone && !_form.student_phone.value) _form.student_phone.value = contact.student_phone;
+        if (contact.parent_phone_2 && !_form.parent_phone_2.value) _form.parent_phone_2.value = contact.parent_phone_2;
+        if (contact.level && window.handleLevelChange) window.handleLevelChange(contact.level);
+
+        // 자동채움 알림 (잠깐 표시)
+        const hint = document.getElementById('contact-autofill-hint');
+        if (hint) {
+            hint.textContent = `연락처에서 "${contact.name}" 정보를 불러왔습니다`;
+            hint.style.display = 'block';
+            setTimeout(() => { hint.style.display = 'none'; }, 3000);
+        }
+    }
+
+    // 이름·전화번호 둘 다 입력 후 자동채움 시도
+    _phoneInput?.addEventListener('change', _tryContactAutofill);
+    _phoneInput?.addEventListener('blur', _tryContactAutofill);
+    _nameInput?.addEventListener('change', _tryContactAutofill);
+
+    // 폼 초기화 시 상태 리셋
+    const origShowNewForm = window.showNewStudentForm;
+    window.showNewStudentForm = (...args) => {
+        _lastFilledDocId = null;
+        return origShowNewForm?.(...args);
+    };
+}
 
 // ---------------------------------------------------------------------------
 // Select a student — populate detail panel
@@ -1533,6 +1666,29 @@ window.submitNewStudent = async () => {
                 });
             }
             currentStudentId = docId;
+        }
+
+        // contacts 컬렉션에도 기본정보 동기화 (실패해도 학생 저장에 영향 없음)
+        try {
+            const contactDocId = isEditMode ? currentStudentId : makeDocId(name, parentPhone1);
+            const contactData = {
+                name,
+                level: studentData.level || '',
+                school: studentData.school || '',
+                grade: studentData.grade || '',
+                student_phone: studentData.student_phone || '',
+                parent_phone_1: studentData.parent_phone_1 || parentPhone1,
+                parent_phone_2: studentData.parent_phone_2 || '',
+                updated_at: serverTimestamp(),
+            };
+            await setDoc(doc(db, 'contacts', contactDocId), contactData, { merge: true });
+            // 로컬 캐시 갱신
+            const idx = allContacts.findIndex(c => c.id === contactDocId);
+            const merged = { id: contactDocId, ...contactData };
+            if (idx >= 0) Object.assign(allContacts[idx], merged);
+            else allContacts.push(merged);
+        } catch (contactErr) {
+            console.warn('[CONTACTS SYNC]', contactErr);
         }
 
         _pendingEnrollments = [];
