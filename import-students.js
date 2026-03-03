@@ -117,39 +117,41 @@ async function importStudents() {
     const studentMap = {};
 
     for (const raw of rows) {
-        const name = raw['이름'];
-        const parentPhone = raw['학부모연락처1'] || raw['학생연락처'] || '';
+        const name = raw['name'] || raw['이름'];
+        const parentPhone = raw['parent_phone_1'] || raw['학부모연락처1'] || raw['student_phone'] || raw['학생연락처'] || '';
         if (!name) continue;
 
-        const classNumber = raw['레벨기호'] || '';   // CSV '레벨기호' = class_number
+        const classNumber = raw['class_number'] || raw['레벨기호'] || '';   // CSV '레벨기호' = class_number
         const branch = raw['branch'] || branchFromClassNumber(classNumber);
         const docId = makeDocId(name, parentPhone);
 
         // 요일: "월요일" → ["월"], "월,수" → ["월","수"]
-        const dayRaw = raw['요일'] || '';
+        const dayRaw = raw['day'] || raw['요일'] || '';
         const dayArr = dayRaw.split(/[,\s]+/)
             .map(d => d.replace(/요일$/, ''))
             .filter(d => d);
 
         const enrollment = {
             class_type: '정규',
-            level_symbol: raw['학부기호'] || '',     // CSV '학부기호' = level_symbol
+            level_symbol: raw['level_symbol'] || raw['학부기호'] || '',     // CSV '학부기호' = level_symbol
             class_number: classNumber,
             day: dayArr,
-            start_date: raw['시작일'] || ''
+            start_date: raw['start_date'] || raw['시작일'] || ''
         };
 
         if (!studentMap[docId]) {
             studentMap[docId] = {
                 name,
-                level: raw['학부'] || '',
-                school: raw['학교'] || '',
-                grade: raw['학년'] || '',
-                student_phone: raw['학생연락처'] || '',
+                level: raw['level'] || raw['학부'] || '',
+                school: raw['school'] || raw['학교'] || '',
+                grade: raw['grade'] || raw['학년'] || '',
+                student_phone: raw['student_phone'] || raw['학생연락처'] || '',
                 parent_phone_1: parentPhone,
-                parent_phone_2: raw['학부모연락처2'] || '',
+                parent_phone_2: raw['parent_phone_2'] || raw['학부모연락처2'] || '',
+                guardian_name_1: raw['guardian_name_1'] || raw['보호자명1'] || '',
+                guardian_name_2: raw['guardian_name_2'] || raw['보호자명2'] || '',
                 branch,
-                status: raw['상태'] || '재원',
+                status: raw['status'] || raw['상태'] || '재원',
                 enrollments: []
             };
         }

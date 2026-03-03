@@ -32,6 +32,19 @@ const SEMESTER_NAMES = {
 };
 const DEFAULT_SEMESTER_NAMES = ['Winter', 'Spring', 'Summer', 'Autumn'];
 
+// 구글시트 내보내기/템플릿 공용 헤더
+const STUDENT_SHEET_HEADERS = [
+    'name', 'level', 'school', 'grade', 'student_phone',
+    'parent_phone_1', 'parent_phone_2', 'guardian_name_1', 'guardian_name_2',
+    'branch', 'level_symbol', 'class_number',
+    'class_type', 'start_date', 'end_date', 'day',
+    'status', 'pause_start_date', 'pause_end_date', 'semester'
+];
+
+// semester를 제외한 필터가 하나라도 활성화되어 있는지 확인
+const hasNonSemesterFilter = () =>
+    Object.entries(activeFilters).filter(([k]) => k !== 'semester').some(([, v]) => v !== null);
+
 // 학부 + 연도 기준으로 <option> 문자열 생성 (현재 연도 + 다음 연도)
 function getSemesterOptions(level, selectedSemester) {
     const year = new Date().getFullYear();
@@ -49,7 +62,7 @@ let currentUserRole = null; // 'admin' | 'teacher' | null
 let currentStudentId = null;
 let allStudents = [];
 // 타입별 독립 필터 — 다른 타입끼리 AND 복합 적용
-let activeFilters = { level: null, branch: null, day: null, status: null, class_type: null, class_code: null, leave: null, semester: null };
+let activeFilters = { level: null, branch: null, day: null, status: null, class_type: null, class_code: null, leave: null, semester: null, grade: null };
 // 학기 필터는 localStorage에 저장하여 페이지 새로고침 후에도 유지
 const _savedSemester = localStorage.getItem('semesterFilter');
 if (_savedSemester) activeFilters.semester = _savedSemester;
@@ -63,6 +76,7 @@ let siblingMap = {};    // studentId → [siblingId, ...]
 let memoCache = {};     // studentId → true/false (메모 존재 여부)
 let semesterSettings = {};   // semester → { start_date }
 let currentSemester = null;  // 오늘 기준 현재 학기
+let currentFilteredStudents = null; // 필터 적용 후 학생 목록 (내보내기용)
 
 // HTML 이스케이프 — 사용자 입력을 innerHTML에 삽입할 때 XSS 방지
 const esc = (str) => {
@@ -365,6 +379,7 @@ async function loadStudentList() {
         allStudents.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
         buildSiblingMap();
         buildClassFilterSidebar();
+        buildGradeFilterSidebar();
         buildSemesterFilter();
         updateReadonlyBanner();
         updateLeaveCountBadges();
@@ -554,50 +569,40 @@ function updateLeaveCountBadges() {
     if (el3) el3.textContent = nonReturn.length || '';
 }
 
-function buildClassFilterSidebar() {
-    const list = document.getElementById('class-filter-list');
+// 동적 필터 사이드바 공용 빌더
+function buildDynamicFilterSidebar({ listId, filterKey, emptyMsg, getItems, sortFn, labelFn, preFilter }) {
+    const list = document.getElementById(listId);
     if (!list) return;
 
-    // branch 필터가 활성화되어 있으면 해당 branch 학생만 대상
-    let targetStudents = allStudents;
-    if (activeFilters.branch) {
-        targetStudents = allStudents.filter(s => branchesFromStudent(s).includes(activeFilters.branch));
-    }
-
-    // 학기 필터가 활성화되어 있으면 해당 학기 enrollment의 반 코드만 표시
-    const semFilter = activeFilters.semester;
-    const codeCount = {};
+    const targetStudents = preFilter ? allStudents.filter(preFilter) : allStudents;
+    const countMap = {};
     targetStudents.forEach(s => {
-        const enrollments = semFilter
-            ? (s.enrollments || []).filter(e => e.semester === semFilter)
-            : getActiveEnrollments(s);
-        enrollments.forEach(e => {
-            const code = enrollmentCode(e);
-            if (code) codeCount[code] = (codeCount[code] || 0) + 1;
+        getItems(s).forEach(item => {
+            if (item) countMap[item] = (countMap[item] || 0) + 1;
         });
     });
 
-    const sortedCodes = Object.keys(codeCount).sort((a, b) => a.localeCompare(b, 'ko'));
+    const sorted = Object.keys(countMap).sort(sortFn);
 
-    if (sortedCodes.length === 0) {
-        list.innerHTML = '<li style="padding:8px 12px 8px 28px;font-size:12px;color:var(--text-sec);">등록된 반이 없습니다</li>';
+    if (sorted.length === 0) {
+        list.innerHTML = `<li style="padding:8px 12px 8px 28px;font-size:12px;color:var(--text-sec);">${emptyMsg}</li>`;
         return;
     }
 
     list.innerHTML = '';
-    sortedCodes.forEach(code => {
+    sorted.forEach(value => {
         const li = document.createElement('li');
-        li.className = 'menu-l2 nav-item' + (activeFilters.class_code === code ? ' active' : '');
-        li.dataset.filterType = 'class_code';
-        li.dataset.filterValue = code;
-        li.innerHTML = `<span class="class-filter-item"><span class="class-filter-code">${esc(code)}</span></span><span class="class-filter-count">${codeCount[code]}</span>`;
+        li.className = 'menu-l2 nav-item' + (activeFilters[filterKey] === value ? ' active' : '');
+        li.dataset.filterType = filterKey;
+        li.dataset.filterValue = value;
+        li.innerHTML = `<span class="class-filter-item"><span class="class-filter-code">${labelFn(value)}</span></span><span class="class-filter-count">${countMap[value]}</span>`;
         li.addEventListener('click', () => {
-            if (activeFilters.class_code === code) {
-                activeFilters.class_code = null;
+            if (activeFilters[filterKey] === value) {
+                activeFilters[filterKey] = null;
                 li.classList.remove('active');
             } else {
                 list.querySelectorAll('.nav-item.active').forEach(el => el.classList.remove('active'));
-                activeFilters.class_code = code;
+                activeFilters[filterKey] = value;
                 li.classList.add('active');
             }
             document.querySelector('.menu-l1[data-filter-type="all"]')?.classList.remove('active');
@@ -607,12 +612,48 @@ function buildClassFilterSidebar() {
     });
 }
 
+function buildClassFilterSidebar() {
+    const semFilter = activeFilters.semester;
+    buildDynamicFilterSidebar({
+        listId: 'class-filter-list',
+        filterKey: 'class_code',
+        emptyMsg: '등록된 반이 없습니다',
+        preFilter: activeFilters.branch ? s => branchesFromStudent(s).includes(activeFilters.branch) : null,
+        getItems: s => {
+            const enrollments = semFilter
+                ? (s.enrollments || []).filter(e => e.semester === semFilter)
+                : getActiveEnrollments(s);
+            return enrollments.map(e => enrollmentCode(e)).filter(Boolean);
+        },
+        sortFn: (a, b) => a.localeCompare(b, 'ko'),
+        labelFn: code => esc(code),
+    });
+}
+
+function buildGradeFilterSidebar() {
+    buildDynamicFilterSidebar({
+        listId: 'grade-filter-list',
+        filterKey: 'grade',
+        emptyMsg: '학년 정보가 없습니다',
+        preFilter: activeFilters.level ? s => s.level === activeFilters.level : null,
+        getItems: s => s.grade ? [String(s.grade)] : [],
+        sortFn: (a, b) => Number(a) - Number(b),
+        labelFn: grade => `${esc(grade)}학년`,
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Filter + search then render
 // ---------------------------------------------------------------------------
 function applyFilterAndRender() {
-    // branch 필터가 바뀌면 class 목록 갱신 + 없어진 class_code 해제
+    // 필터 변경 시 동적 사이드바 갱신
     buildClassFilterSidebar();
+    buildGradeFilterSidebar();
+    if (activeFilters.grade) {
+        const gradeListEl = document.getElementById('grade-filter-list');
+        const stillExists = gradeListEl?.querySelector(`[data-filter-value="${CSS.escape(activeFilters.grade)}"]`);
+        if (!stillExists) activeFilters.grade = null;
+    }
     if (activeFilters.class_code) {
         const classListEl = document.getElementById('class-filter-list');
         const stillExists = classListEl?.querySelector(`[data-filter-value="${CSS.escape(activeFilters.class_code)}"]`);
@@ -622,11 +663,7 @@ function applyFilterAndRender() {
     let filtered = allStudents;
 
     // 필터가 아무것도 활성화되지 않은 상태(All Students 기본) → 퇴원 제외
-    // semester는 sticky 필터이므로 '퇴원 제외' 판단에서 제외
-    const hasAnyFilter = Object.entries(activeFilters)
-        .filter(([k]) => k !== 'semester')
-        .some(([, v]) => v !== null);
-    if (!hasAnyFilter) {
+    if (!hasNonSemesterFilter()) {
         filtered = filtered.filter(s => s.status !== '퇴원');
     }
 
@@ -637,6 +674,7 @@ function applyFilterAndRender() {
     if (activeFilters.status) filtered = filtered.filter(s => s.status === activeFilters.status);
     if (activeFilters.class_type) filtered = filtered.filter(s => relevantEnrollments(s).some(e => e.class_type === activeFilters.class_type));
     if (activeFilters.class_code) filtered = filtered.filter(s => activeClassCodes(s).includes(activeFilters.class_code));
+    if (activeFilters.grade) filtered = filtered.filter(s => String(s.grade) === String(activeFilters.grade));
     // 휴원 필터 활성 시에는 학기 필터를 건너뜀 (휴원생은 현재 학기 enrollment이 없을 수 있음)
     if (activeFilters.semester && !activeFilters.leave) filtered = filtered.filter(s => (s.enrollments || []).some(e => e.semester === activeFilters.semester));
     if (activeFilters.leave) {
@@ -683,6 +721,7 @@ function applyFilterAndRender() {
         });
     }
 
+    currentFilteredStudents = filtered;
     updateFilterChips();
     renderStudentList(filtered);
 }
@@ -712,8 +751,8 @@ window.clearFilters = () => {
     syncSemesterDropdowns(keepSemester || '');
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
     document.querySelector('.menu-l1[data-filter-type="all"]')?.classList.add('active');
-    // 반별 필터 active 해제
-    document.querySelectorAll('#class-filter-list .nav-item').forEach(el => el.classList.remove('active'));
+    // 동적 필터 active 해제
+    document.querySelectorAll('#class-filter-list .nav-item, #grade-filter-list .nav-item').forEach(el => el.classList.remove('active'));
     applyFilterAndRender();
 };
 
@@ -1367,7 +1406,7 @@ window.submitNewStudent = async () => {
             name,
             level: f.level.value,
             school: f.school.value.trim(),
-            grade: f.grade.value.trim(),
+            grade: f.grade.value.trim().replace(/[^0-9]/g, ''),
             student_phone: f.student_phone.value.trim(),
             parent_phone_1: parentPhone1,
             parent_phone_2: f.parent_phone_2.value.trim(),
@@ -1424,7 +1463,7 @@ window.submitNewStudent = async () => {
             name,
             level: f.level.value,
             school: f.school.value.trim(),
-            grade: f.grade.value.trim(),
+            grade: f.grade.value.trim().replace(/[^0-9]/g, ''),
             student_phone: f.student_phone.value.trim(),
             parent_phone_1: parentPhone1,
             parent_phone_2: f.parent_phone_2.value.trim(),
@@ -2245,7 +2284,8 @@ window.checkDurationLimit = () => {
 // Google Sheets Export / Import (GAS Web App 연동)
 // ---------------------------------------------------------------------------
 window.handleSheetExport = async () => {
-    if (!allStudents || allStudents.length === 0) {
+    const exportStudents = currentFilteredStudents ?? allStudents;
+    if (!exportStudents || exportStudents.length === 0) {
         alert('내보낼 데이터가 없습니다.');
         return;
     }
@@ -2255,22 +2295,18 @@ window.handleSheetExport = async () => {
         return;
     }
 
-    const EXPORT_HEADERS = [
-        '이름', '학부', '학교', '학년', '학생연락처',
-        '학부모연락처1', '학부모연락처2', '소속', '레벨기호', '반넘버',
-        '수업종류', '시작일', '종료일', '요일',
-        '상태', '휴원시작일', '휴원종료일', '학기'
-    ];
+    const EXPORT_HEADERS = STUDENT_SHEET_HEADERS;
 
-    // allStudents → enrollment 단위 행으로 변환 (GAS studentsToRows와 동일)
+    // exportStudents → enrollment 단위 행으로 변환 (GAS studentsToRows와 동일)
     const dataRows = [];
-    allStudents.forEach(s => {
+    exportStudents.forEach(s => {
         const enrollments = s.enrollments || [];
         const branch = s.branch || '';
         if (enrollments.length === 0) {
             dataRows.push([
                 s.name || '', s.level || '', s.school || '', s.grade || '',
                 s.student_phone || '', s.parent_phone_1 || '', s.parent_phone_2 || '',
+                s.guardian_name_1 || '', s.guardian_name_2 || '',
                 branch, '', '', '정규', '', '', '',
                 s.status || '재원', s.pause_start_date || '', s.pause_end_date || '', ''
             ]);
@@ -2280,6 +2316,7 @@ window.handleSheetExport = async () => {
                 dataRows.push([
                     s.name || '', s.level || '', s.school || '', s.grade || '',
                     s.student_phone || '', s.parent_phone_1 || '', s.parent_phone_2 || '',
+                    s.guardian_name_1 || '', s.guardian_name_2 || '',
                     branch,
                     e.level_symbol || '', e.class_number || '', e.class_type || '정규',
                     e.start_date || '', e.end_date || '', dayStr,
@@ -2292,6 +2329,7 @@ window.handleSheetExport = async () => {
     try {
         // 1. 스프레드시트 생성 + 헤더 + 데이터 한번에
         const today = new Date().toISOString().slice(0, 10);
+        const sheetTitle = `impact7DB_${today}${hasNonSemesterFilter() ? '_필터적용' : ''}`;
         const headerRow = {
             values: EXPORT_HEADERS.map(h => ({
                 userEnteredValue: { stringValue: h },
@@ -2309,7 +2347,7 @@ window.handleSheetExport = async () => {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                properties: { title: `impact7DB_${today}` },
+                properties: { title: sheetTitle },
                 sheets: [{
                     properties: { title: '학생데이터', gridProperties: { frozenRowCount: 1 } },
                     data: [{ startRow: 0, startColumn: 0, rowData: [headerRow, ...bodyRows] }]
@@ -2370,12 +2408,7 @@ window.handleSheetTemplate = async () => {
         return;
     }
 
-    const TMPL_HEADERS = [
-        '이름', '학부', '학교', '학년', '학생연락처',
-        '학부모연락처1', '학부모연락처2', '소속', '레벨기호', '반넘버',
-        '수업종류', '시작일', '종료일', '요일',
-        '상태', '휴원시작일', '휴원종료일', '학기'
-    ];
+    const TMPL_HEADERS = STUDENT_SHEET_HEADERS;
 
     try {
         // 1. 사용자 드라이브에 스프레드시트 생성
@@ -2524,14 +2557,22 @@ async function importFromSheetId(sheetId, sheetName) {
         // GAS 템플릿 헤더 → 통합 upsert 필드명 매핑
         const sheetHeaders = sheetRows[0];
         const headerMap = {
-            '이름': '이름', '학부': '학부', '학교': '학교', '학년': '학년',
-            '학생연락처': '학생연락처', '학부모연락처1': '학부모연락처1', '학부모연락처2': '학부모연락처2',
-            '소속': 'branch',
-            '레벨기호': 'level_symbol',
-            '반넘버': 'class_number',
-            '수업종류': 'class_type',
-            '시작일': '시작일', '종료일': '종료일', '요일': '요일', '상태': '상태',
-            '휴원시작일': '휴원시작일', '휴원종료일': '휴원종료일', '학기': '학기',
+            // English (primary)
+            'name': 'name', 'level': 'level', 'school': 'school', 'grade': 'grade',
+            'student_phone': 'student_phone', 'parent_phone_1': 'parent_phone_1', 'parent_phone_2': 'parent_phone_2',
+            'guardian_name_1': 'guardian_name_1', 'guardian_name_2': 'guardian_name_2',
+            'branch': 'branch', 'level_symbol': 'level_symbol', 'class_number': 'class_number',
+            'class_type': 'class_type', 'start_date': 'start_date', 'end_date': 'end_date',
+            'day': 'day', 'status': 'status',
+            'pause_start_date': 'pause_start_date', 'pause_end_date': 'pause_end_date', 'semester': 'semester',
+            // Korean (backward compat)
+            '이름': 'name', '학부': 'level', '학교': 'school', '학년': 'grade',
+            '학생연락처': 'student_phone', '학부모연락처1': 'parent_phone_1', '학부모연락처2': 'parent_phone_2',
+            '보호자명1': 'guardian_name_1', '보호자명2': 'guardian_name_2',
+            '소속': 'branch', '레벨기호': 'level_symbol', '반넘버': 'class_number',
+            '수업종류': 'class_type', '시작일': 'start_date', '종료일': 'end_date',
+            '요일': 'day', '상태': 'status',
+            '휴원시작일': 'pause_start_date', '휴원종료일': 'pause_end_date', '학기': 'semester',
         };
 
         const rows = sheetRows.slice(1).map(row => {
@@ -2583,26 +2624,28 @@ async function runCsvUpsert(csvText, fileName) {
         return obj;
     });
 
-    // CSV 컬럼명으로 통일: 레벨기호→level_symbol, 반넘버→class_number, branch→branch
+    // 영어 우선, 한글 폴백 — 영어/한글 CSV 모두 지원
     const normalized = rows.map(raw => ({
-        이름: raw['이름'] || '',
-        학부: raw['학부'] || '',
-        학교: raw['학교'] || '',
-        학년: raw['학년'] || '',
-        학생연락처: raw['학생연락처'] || '',
-        학부모연락처1: raw['학부모연락처1'] || '',
-        학부모연락처2: raw['학부모연락처2'] || '',
-        branch: raw['branch'] || '',
-        level_symbol: raw['레벨기호'] || '',
-        class_number: raw['반넘버'] || '',
-        class_type: raw['수업종류'] || '정규',
-        시작일: raw['시작일'] || '',
-        요일: raw['요일'] || '',
-        상태: raw['상태'] || '재원',
-        학기: raw['학기'] || '',
-        종료일: raw['종료일'] || '',
-        휴원시작일: raw['휴원시작일'] || '',
-        휴원종료일: raw['휴원종료일'] || '',
+        name: raw['name'] || raw['이름'] || '',
+        level: raw['level'] || raw['학부'] || '',
+        school: raw['school'] || raw['학교'] || '',
+        grade: raw['grade'] || raw['학년'] || '',
+        student_phone: raw['student_phone'] || raw['학생연락처'] || '',
+        parent_phone_1: raw['parent_phone_1'] || raw['학부모연락처1'] || '',
+        parent_phone_2: raw['parent_phone_2'] || raw['학부모연락처2'] || '',
+        guardian_name_1: raw['guardian_name_1'] || raw['보호자명1'] || '',
+        guardian_name_2: raw['guardian_name_2'] || raw['보호자명2'] || '',
+        branch: raw['branch'] || raw['소속'] || '',
+        level_symbol: raw['level_symbol'] || raw['레벨기호'] || '',
+        class_number: raw['class_number'] || raw['반넘버'] || '',
+        class_type: raw['class_type'] || raw['수업종류'] || '정규',
+        start_date: raw['start_date'] || raw['시작일'] || '',
+        day: raw['day'] || raw['요일'] || '',
+        status: raw['status'] || raw['상태'] || '재원',
+        semester: raw['semester'] || raw['학기'] || '',
+        end_date: raw['end_date'] || raw['종료일'] || '',
+        pause_start_date: raw['pause_start_date'] || raw['휴원시작일'] || '',
+        pause_end_date: raw['pause_end_date'] || raw['휴원종료일'] || '',
     }));
 
     await runUpsertFromRows(normalized, fileName);
@@ -2610,8 +2653,9 @@ async function runCsvUpsert(csvText, fileName) {
 
 /**
  * 공통 Upsert 로직 — CSV, 구글시트 모두 이 함수로 통합
- * rows: [{ 이름, 학부, 학교, 학년, 학생연락처, 학부모연락처1, 학부모연락처2,
- *           branch, level_symbol, class_number, class_type, 시작일, 요일, 상태 }]
+ * rows: [{ name, level, school, grade, student_phone, parent_phone_1, parent_phone_2,
+ *           guardian_name_1, guardian_name_2, branch, level_symbol, class_number,
+ *           class_type, start_date, day, status, ... }]
  */
 async function runUpsertFromRows(rows, sourceName) {
     if (!rows || rows.length === 0) { alert('데이터가 없습니다.'); return; }
@@ -2619,15 +2663,15 @@ async function runUpsertFromRows(rows, sourceName) {
     // Group by docId
     const studentMap = {};
     for (const raw of rows) {
-        const name = raw['이름'];
-        const parentPhone = raw['학부모연락처1'] || raw['학생연락처'] || '';
+        const name = raw['name'] || raw['이름'];
+        const parentPhone = raw['parent_phone_1'] || raw['학부모연락처1'] || raw['student_phone'] || raw['학생연락처'] || '';
         if (!name) continue;
 
         const classNumber = raw['class_number'] || '';
         const branch = raw['branch'] || branchFromClassNumber(classNumber);
         const docId = makeDocId(name, parentPhone);
 
-        const dayRaw = raw['요일'] || '';
+        const dayRaw = raw['day'] || raw['요일'] || '';
         const dayArr = dayRaw.split(/[,\s]+/).map(d => d.replace(/요일$/, '')).filter(d => d);
 
         const enrollment = {
@@ -2635,19 +2679,22 @@ async function runUpsertFromRows(rows, sourceName) {
             level_symbol: raw['level_symbol'] || '',
             class_number: classNumber,
             day: dayArr,
-            start_date: raw['시작일'] || '',
-            semester: raw['학기'] || '',
+            start_date: raw['start_date'] || raw['시작일'] || '',
+            semester: raw['semester'] || raw['학기'] || '',
         };
-        if (raw['종료일']) enrollment.end_date = raw['종료일'];
+        const endDate = raw['end_date'] || raw['종료일'] || '';
+        if (endDate) enrollment.end_date = endDate;
 
         if (!studentMap[docId]) {
             studentMap[docId] = {
-                name, level: raw['학부'] || '', school: raw['학교'] || '',
-                grade: raw['학년'] || '', student_phone: raw['학생연락처'] || '',
-                parent_phone_1: parentPhone, parent_phone_2: raw['학부모연락처2'] || '',
-                branch, status: raw['상태'] || '재원',
-                pause_start_date: raw['휴원시작일'] || '',
-                pause_end_date: raw['휴원종료일'] || '',
+                name, level: raw['level'] || raw['학부'] || '', school: raw['school'] || raw['학교'] || '',
+                grade: raw['grade'] || raw['학년'] || '', student_phone: raw['student_phone'] || raw['학생연락처'] || '',
+                parent_phone_1: parentPhone, parent_phone_2: raw['parent_phone_2'] || raw['학부모연락처2'] || '',
+                guardian_name_1: raw['guardian_name_1'] || raw['보호자명1'] || '',
+                guardian_name_2: raw['guardian_name_2'] || raw['보호자명2'] || '',
+                branch, status: raw['status'] || raw['상태'] || '재원',
+                pause_start_date: raw['pause_start_date'] || raw['휴원시작일'] || '',
+                pause_end_date: raw['pause_end_date'] || raw['휴원종료일'] || '',
                 has_memo: false,
                 enrollments: []
             };
@@ -2665,7 +2712,7 @@ async function runUpsertFromRows(rows, sourceName) {
     }
 
     // 4) Compare and classify
-    const infoFields = ['name', 'level', 'school', 'grade', 'student_phone', 'parent_phone_1', 'parent_phone_2', 'branch', 'status', 'pause_start_date', 'pause_end_date'];
+    const infoFields = ['name', 'level', 'school', 'grade', 'student_phone', 'parent_phone_1', 'parent_phone_2', 'guardian_name_1', 'guardian_name_2', 'branch', 'status', 'pause_start_date', 'pause_end_date'];
 
     const results = { inserted: [], updated: [], skipped: [] };
     const writes = [];
@@ -3471,6 +3518,108 @@ window.resetBulkClass = () => {
 };
 window.resetBulkDays = () => {
     document.querySelectorAll('#bulk-day-checkboxes input').forEach(cb => cb.checked = false);
+};
+
+// ---------------------------------------------------------------------------
+// 일괄 학년 승격 (우측 패널)
+// ---------------------------------------------------------------------------
+window.applyBulkPromotion = async () => {
+    if (isPastSemester()) { alert('과거 학기는 수정할 수 없습니다.'); return; }
+    if (selectedStudentIds.size === 0) { alert('학생을 선택해주세요.'); return; }
+    const newSchool = document.getElementById('bulk-promote-school').value.trim();
+
+    // 승격 규칙: 초등 max 6학년, 중등 max 3학년, 고등 max 3학년
+    const MAX_GRADE = { '초등': 6, '중등': 3, '고등': 3 };
+    const NEXT_LEVEL = { '초등': '중등', '중등': '고등' };
+
+    const ids = [...selectedStudentIds];
+    const changes = [];
+    const skipped = [];
+
+    ids.forEach(id => {
+        const student = allStudents.find(s => s.id === id);
+        if (!student) return;
+        const oldLevel = student.level || '';
+        const oldGrade = parseInt(student.grade, 10) || 0;
+        const oldSchool = student.school || '';
+        if (!oldLevel || !oldGrade) { skipped.push(`${student.name} (학부/학년 정보 없음)`); return; }
+
+        const maxG = MAX_GRADE[oldLevel] || 6;
+        let afterLevel = oldLevel;
+        let afterGrade = oldGrade + 1;
+        let afterSchool = oldSchool;
+        let isTransition = false;
+
+        if (oldGrade >= maxG) {
+            // 학부 전환 (초6→중1, 중3→고1)
+            const next = NEXT_LEVEL[oldLevel];
+            if (!next) { skipped.push(`${student.name} (고${oldGrade} — 졸업 대상)`); return; }
+            afterLevel = next;
+            afterGrade = 1;
+            isTransition = true;
+            afterSchool = newSchool || '';  // 전환 시 학교 비우면 빈칸으로 초기화
+        }
+
+        const beforeParts = [oldLevel, `${oldGrade}학년`, oldSchool].filter(Boolean).join(' ');
+        const afterParts = [afterLevel, `${afterGrade}학년`, afterSchool].filter(Boolean).join(' ');
+
+        const updateData = { grade: afterGrade };
+        if (afterLevel !== oldLevel) updateData.level = afterLevel;
+        if (afterSchool !== oldSchool) updateData.school = afterSchool;
+
+        changes.push({ id, name: student.name, before: beforeParts, after: afterParts, updateData, afterLevel, afterGrade, afterSchool, isTransition });
+    });
+
+    if (changes.length === 0) { alert('승격할 학생이 없습니다.' + (skipped.length ? `\n\n건너뜀:\n${skipped.join('\n')}` : '')); return; }
+
+    // 확인 메시지 구성
+    const normal = changes.filter(c => !c.isTransition);
+    const transition = changes.filter(c => c.isTransition);
+    let desc = `총 ${changes.length}명 학년 +1 승격`;
+    if (normal.length) desc += `\n• 일반 승격: ${normal.length}명`;
+    if (transition.length) desc += `\n• 학부 전환: ${transition.length}명 (${transition.map(c => `${c.name}: ${c.before} → ${c.after}`).join(', ')})`;
+    if (skipped.length) desc += `\n\n건너뜀 ${skipped.length}명:\n${skipped.join('\n')}`;
+    if (!confirm(desc)) return;
+
+    try {
+        const BATCH_SIZE = 200;
+        for (let i = 0; i < changes.length; i += BATCH_SIZE) {
+            const chunk = changes.slice(i, i + BATCH_SIZE);
+            const batch = writeBatch(db);
+            chunk.forEach(c => {
+                batch.update(doc(db, 'students', c.id), c.updateData);
+                const historyRef = doc(collection(db, 'history_logs'));
+                batch.set(historyRef, {
+                    doc_id: c.id, change_type: 'UPDATE',
+                    before: c.before, after: `${c.after} (일괄승격)`,
+                    google_login_id: currentUser?.email || '—', timestamp: serverTimestamp()
+                });
+            });
+            await batch.commit();
+        }
+
+        // 로컬 데이터 업데이트
+        changes.forEach(c => {
+            const s = allStudents.find(s => s.id === c.id);
+            if (s) {
+                s.grade = c.afterGrade;
+                if (c.afterLevel !== s.level) s.level = c.afterLevel;
+                if (c.afterSchool !== s.school) s.school = c.afterSchool;
+            }
+        });
+
+        document.getElementById('bulk-promote-school').value = '';
+        applyFilterAndRender();
+        updateBulkEditSummary();
+        alert(`${changes.length}명의 학년을 승격했습니다.` + (skipped.length ? `\n건너뜀: ${skipped.length}명` : ''));
+    } catch (e) {
+        console.error('[BULK PROMOTION ERROR]', e);
+        alert('일괄 학년 승격 실패: ' + e.message);
+    }
+};
+
+window.resetBulkPromotion = () => {
+    document.getElementById('bulk-promote-school').value = '';
 };
 
 // ---------------------------------------------------------------------------

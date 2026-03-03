@@ -222,40 +222,43 @@ async function upsertStudents() {
     const studentMap = {};
 
     for (const raw of rows) {
-        const name = raw['이름'];
-        const parentPhone = raw['학부모연락처1'] || raw['학생연락처'] || '';
+        const name = raw['name'] || raw['이름'];
+        const parentPhone = raw['parent_phone_1'] || raw['학부모연락처1'] || raw['student_phone'] || raw['학생연락처'] || '';
         if (!name) continue;
 
-        const classNumber = raw['반넘버'] || '';
-        const branch = raw['소속'] || branchFromClassNumber(classNumber);
+        const classNumber = raw['class_number'] || raw['반넘버'] || '';
+        const branch = raw['branch'] || raw['소속'] || branchFromClassNumber(classNumber);
         const docId = makeDocId(name, parentPhone);
 
-        const dayRaw = raw['요일'] || '';
+        const dayRaw = raw['day'] || raw['요일'] || '';
         const dayArr = dayRaw.split(/[,\s]+/)
             .map(d => d.replace(/요일$/, ''))
             .filter(d => d);
 
         const enrollment = {
-            class_type: raw['수업종류'] || '정규',
-            level_symbol: raw['레벨기호'] || '',
+            class_type: raw['class_type'] || raw['수업종류'] || '정규',
+            level_symbol: raw['level_symbol'] || raw['레벨기호'] || '',
             class_number: classNumber,
             day: dayArr,
-            start_date: raw['시작일'] || '',
-            semester: raw['학기'] || SEMESTER,
+            start_date: raw['start_date'] || raw['시작일'] || '',
+            semester: raw['semester'] || raw['학기'] || SEMESTER,
         };
-        if (raw['종료일']) enrollment.end_date = raw['종료일'];
+        const endDate = raw['end_date'] || raw['종료일'] || '';
+        if (endDate) enrollment.end_date = endDate;
 
         if (!studentMap[docId]) {
             studentMap[docId] = {
                 name,
-                level: raw['학부'] || '',
-                school: raw['학교'] || '',
-                grade: raw['학년'] || '',
-                student_phone: raw['학생연락처'] || '',
+                level: raw['level'] || raw['학부'] || '',
+                school: raw['school'] || raw['학교'] || '',
+                grade: raw['grade'] || raw['학년'] || '',
+                student_phone: raw['student_phone'] || raw['학생연락처'] || '',
                 parent_phone_1: parentPhone,
-                parent_phone_2: raw['학부모연락처2'] || '',
+                parent_phone_2: raw['parent_phone_2'] || raw['학부모연락처2'] || '',
+                guardian_name_1: raw['guardian_name_1'] || raw['보호자명1'] || '',
+                guardian_name_2: raw['guardian_name_2'] || raw['보호자명2'] || '',
                 branch,
-                status: raw['상태'] || '재원',
+                status: raw['status'] || raw['상태'] || '재원',
                 enrollments: []
             };
         }

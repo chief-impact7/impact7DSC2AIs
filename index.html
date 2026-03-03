@@ -112,6 +112,16 @@
                 </ul>
             </details>
 
+            <!-- L1: 학년별 필터 (동적) -->
+            <details class="l1-group" id="grade-filter-group">
+                <summary class="menu-l1">
+                    <span class="material-symbols-outlined">format_list_numbered</span>Grade
+                </summary>
+                <ul class="nav-list" id="grade-filter-list">
+                    <li style="padding:8px 12px 8px 28px;font-size:12px;color:var(--text-sec);">로그인 후 표시됩니다</li>
+                </ul>
+            </details>
+
             <!-- L1: Branch (L2 토글) -->
             <details class="l1-group">
                 <summary class="menu-l1">
@@ -344,6 +354,21 @@
                             </div>
                         </div>
 
+                        <!-- 학년 승격 일괄 변경 -->
+                        <div class="bulk-edit-section">
+                            <h4 class="bulk-edit-section-title">
+                                <span class="material-symbols-outlined">school</span>학년 승격
+                            </h4>
+                            <p style="font-size:12px; color:#666; margin:0 0 6px;">전원 +1학년. 초6→중1, 중3→고1은 학부 자동 변경</p>
+                            <div class="bulk-edit-row" style="gap:8px;">
+                                <input class="field-input" id="bulk-promote-school" type="text" placeholder="새 학교 (전환 학생만, 선택)" style="flex:1;">
+                            </div>
+                            <div class="bulk-edit-row" style="margin-top:8px;">
+                                <button class="btn-save bulk-apply-btn" onclick="window.applyBulkPromotion()">+1 학년 승격</button>
+                                <button class="btn-cancel bulk-reset-btn" onclick="window.resetBulkPromotion()">초기화</button>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
 
@@ -519,7 +544,7 @@
                                     </div>
                                     <div class="form-field">
                                         <label class="field-label">학년</label>
-                                        <input class="field-input" name="grade" type="text" placeholder="3">
+                                        <input class="field-input" name="grade" type="number" min="1" max="6" placeholder="3">
                                     </div>
                                 </div>
                             </div>
