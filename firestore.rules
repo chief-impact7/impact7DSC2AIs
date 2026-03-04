@@ -43,10 +43,12 @@ service cloud.firestore {
         let allowed = [
           'name', 'level', 'school', 'grade',
           'student_phone', 'parent_phone_1', 'parent_phone_2',
+          'guardian_name_1', 'guardian_name_2',
           'branch', 'status', 'enrollments',
           'pause_start_date', 'pause_end_date',
           'day', 'class_type', 'level_code', 'level_symbol', 'class_number',
           'start_date', 'special_start_date', 'special_end_date',
+          'first_registered',
           'has_memo'
         ];
         return request.resource.data.keys().hasOnly(allowed);
@@ -423,6 +425,25 @@ service cloud.firestore {
       allow create, update: if isAuthorized()
         && request.resource.data.keys().hasOnly(['start_date'])
         && withinFieldLimit(5);
+
+      allow delete: if isAuthorized();
+    }
+
+    // =========================================================================
+    // [DB] Contacts (과거 연락처)
+    // =========================================================================
+    match /contacts/{docId} {
+      allow read: if isAuthorized();
+
+      allow create, update: if isAuthorized()
+        && request.resource.data.keys().hasOnly([
+          'name', 'level', 'school', 'grade',
+          'student_phone', 'parent_phone_1', 'parent_phone_2',
+          'guardian_name_1', 'guardian_name_2',
+          'first_registered', 'status_history',
+          'created_at', 'updated_at'
+        ])
+        && withinFieldLimit(15);
 
       allow delete: if isAuthorized();
     }

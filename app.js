@@ -1189,6 +1189,31 @@ document.querySelectorAll('.sidebar > details.l1-group').forEach(details => {
 });
 
 // ---------------------------------------------------------------------------
+// Sidebar toggle (모바일/태블릿)
+// ---------------------------------------------------------------------------
+{
+    const _menuBtn = document.querySelector('.app-bar-left .icon-btn[aria-label="메뉴"]');
+    const _sidebar = document.querySelector('.sidebar');
+    const _overlay = document.getElementById('sidebarOverlay');
+    const _mobileQuery = window.matchMedia('(max-width: 1024px)');
+
+    function toggleSidebar() {
+        const open = _sidebar?.classList.toggle('open');
+        _overlay?.classList.toggle('open', open);
+    }
+
+    _menuBtn?.addEventListener('click', toggleSidebar);
+    _overlay?.addEventListener('click', toggleSidebar);
+
+    // 사이드바 내 필터 클릭 시 자동 닫기
+    _sidebar?.addEventListener('click', (e) => {
+        if (e.target.closest('.nav-item')) {
+            if (_mobileQuery.matches) toggleSidebar();
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
 // 검색 입력 debounce (200ms) — 매 키 입력마다 전체 렌더링 방지

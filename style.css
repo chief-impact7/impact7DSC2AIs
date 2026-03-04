@@ -2389,6 +2389,28 @@ summary.menu-l2 .material-symbols-outlined {
 @media (max-width: 1024px) {
     .sidebar {
         display: none;
+        position: fixed;
+        top: 64px;
+        left: 0;
+        bottom: 0;
+        z-index: 200;
+        background: var(--surface, #fff);
+        box-shadow: 4px 0 12px rgba(0,0,0,.15);
+        width: 260px;
+    }
+    .sidebar.open {
+        display: flex;
+    }
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        top: 64px;
+        z-index: 199;
+        background: rgba(0,0,0,.3);
+    }
+    .sidebar-overlay.open {
+        display: block;
     }
     .semester-filter-mobile {
         display: inline-block;
@@ -2414,9 +2436,6 @@ summary.menu-l2 .material-symbols-outlined {
 @media (max-width: 768px) {
     .container {
         flex-direction: column;
-    }
-    .sidebar {
-        display: none;
     }
     .main-content {
         flex-direction: column;
