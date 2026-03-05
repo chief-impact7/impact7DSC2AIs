@@ -132,9 +132,9 @@ const getActiveEnrollments = (s) => {
     const byType = {};
 
     for (const e of enrollments) {
-        const ct = e.class_type || '정규';
-        if (!byType[ct]) byType[ct] = [];
-        byType[ct].push(e);
+        const key = (e.class_type || '정규') + ':' + (e.class_number || '');
+        if (!byType[key]) byType[key] = [];
+        byType[key].push(e);
     }
 
     const active = [];
@@ -1778,6 +1778,13 @@ window.handleFormClassTypeChange = () => {
     applyDateConstraints(startInput, endInput);
 };
 
+// 수업 모달 학기 드롭다운 공통 채우기
+function _populateEnrollmentSemester(level) {
+    const sel = document.getElementById('enroll-semester-select');
+    const def = activeFilters.semester || localStorage.getItem('lastSelectedSemester') || '';
+    if (sel) sel.innerHTML = getSemesterOptions(level, def);
+}
+
 // 신규등록 폼: 수업 추가 모달 열기 (enrollment-modal 재사용, 로컬 저장)
 window.openFormEnrollmentModal = () => {
     const modal = document.getElementById('enrollment-modal');
@@ -1794,10 +1801,7 @@ window.openFormEnrollmentModal = () => {
     const endInput = modal.querySelector('[name="enroll_end_date"]');
     applyDateConstraints(startInput, endInput);
     // 학부에 맞는 학기 옵션 채우기
-    const level = document.getElementById('new-student-form')?.level?.value || '';
-    const semesterSelect = document.getElementById('enroll-semester-select');
-    const _defSem2 = activeFilters.semester || localStorage.getItem('lastSelectedSemester') || '';
-    if (semesterSelect) semesterSelect.innerHTML = getSemesterOptions(level, _defSem2);
+    _populateEnrollmentSemester(document.getElementById('new-student-form')?.level?.value || '');
     // 모달 데이터 속성으로 컨텍스트 표시 (form = 신규등록 폼에서 호출)
     modal.dataset.context = 'form';
     modal.style.display = 'flex';
@@ -1966,6 +1970,9 @@ window.addEditEnrollment = () => {
     if (startLabel) startLabel.textContent = '등원일';
     const endInput = modal.querySelector('[name="enroll_end_date"]');
     applyDateConstraints(startInput, endInput);
+    // 학기 드롭다운 채우기
+    const student = allStudents.find(s => s.id === currentStudentId);
+    _populateEnrollmentSemester(student?.level || '');
     modal.dataset.context = 'edit';
     modal.style.display = 'flex';
 };
@@ -2140,11 +2147,8 @@ window.openEnrollmentModal = () => {
     applyDateConstraints(startInput, endInput);
     // 학부에 맞는 학기 옵션 채우기
     const student = allStudents.find(s => s.id === currentStudentId);
-    const level = student?.level || '';
-    const semesterSelect = document.getElementById('enroll-semester-select');
-    const _defSem3 = activeFilters.semester || localStorage.getItem('lastSelectedSemester') || '';
-    if (semesterSelect) semesterSelect.innerHTML = getSemesterOptions(level, _defSem3);
-    modal.dataset.context = 'edit';
+    _populateEnrollmentSemester(student?.level || '');
+    delete modal.dataset.context;
     modal.style.display = 'flex';
 };
 
