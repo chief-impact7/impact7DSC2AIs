@@ -16,6 +16,7 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 (async () => {
+  try {
   const backupDir = path.join(__dirname, 'backups');
   if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir);
 
@@ -33,4 +34,8 @@ const db = admin.firestore();
   }
 
   process.exit(0);
+  } catch (err) {
+    console.error('백업 실패:', err);
+    process.exit(1);
+  }
 })();

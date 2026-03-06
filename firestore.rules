@@ -525,7 +525,8 @@ service cloud.firestore {
     // [Director] 사용자/역할 (uid 기반)
     // =========================================================================
     match /director_users/{uid} {
-      allow read: if isLoggedIn() && (isDirector() || request.auth.uid == uid);
+      allow read: if isLoggedIn() && request.auth.uid == uid;
+      allow read: if isDirector();
       allow write: if isDirector();
     }
 

@@ -3839,10 +3839,10 @@ window.confirmBulkDelete = async () => {
     if (isPastSemester()) { alert('과거 학기는 수정할 수 없습니다.'); return; }
     const ids = [...selectedStudentIds];
     const confirmBtn = document.querySelector('#bulk-delete-modal .btn-end-class-confirm');
-    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = '삭제 중...'; }
+    if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = '퇴원 처리 중...'; }
 
     try {
-        // 삭제 전에 학생 이름을 미리 수집 (삭제 후에는 접근 불가)
+        // 퇴원 처리 전에 학생 이름을 미리 수집
         const idNameMap = {};
         ids.forEach(id => {
             const s = allStudents.find(s => s.id === id);
@@ -3865,18 +3865,18 @@ window.confirmBulkDelete = async () => {
             await batch.commit();
         }
 
-        allStudents.forEach(s => { if (ids.includes(s.id)) s.status = '퇴원'; });
+        allStudents.forEach(s => { if (selectedStudentIds.has(s.id)) s.status = '퇴원'; });
         window.closeBulkDeleteModal();
         window.exitBulkMode();
         buildClassFilterSidebar();
         applyFilterAndRender();
         currentStudentId = null;
-        alert(`${ids.length}명의 학생이 삭제되었습니다.`);
+        alert(`${ids.length}명의 학생이 퇴원 처리되었습니다.`);
     } catch (e) {
         console.error('[BULK DELETE ERROR]', e);
-        alert('일괄 삭제 실패: ' + e.message);
+        alert('일괄 퇴원 처리 실패: ' + e.message);
     } finally {
-        if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = '삭제'; }
+        if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = '퇴원'; }
     }
 };
 
