@@ -25,7 +25,7 @@ service cloud.firestore {
     // 인증 헬퍼 (Director 앱용)
     // =========================================================================
     function getUserRole() {
-      return get(/databases/$(database)/documents/director_users/$(request.auth.uid)).data.role;
+      return get(/databases/$(database)/documents/HR_users/$(request.auth.uid)).data.role;
     }
     function isDirector() { return isLoggedIn() && getUserRole() == 'director'; }
     function isStaff() { return isLoggedIn() && getUserRole() == 'staff'; }
@@ -524,9 +524,11 @@ service cloud.firestore {
     // =========================================================================
     // [Director] 사용자/역할 (uid 기반)
     // =========================================================================
-    match /director_users/{uid} {
+    match /HR_users/{uid} {
       allow read: if isLoggedIn() && request.auth.uid == uid;
       allow read: if isDirector();
+      // Allow self-create for bootstrap (only if doc doesn't exist yet)
+      allow create: if isLoggedIn() && request.auth.uid == uid && !exists(/databases/$(database)/documents/HR_users/$(uid));
       allow write: if isDirector();
     }
 
@@ -538,11 +540,32 @@ service cloud.firestore {
     match /teams/{id} { allow read: if isLoggedIn(); allow write: if isDirector(); }
 
     // =========================================================================
+    // [Director] Onboarding Tokens
+    // =========================================================================
+    match /onboardingTokens/{tokenId} {
+      // director/staff: 전체 읽기·쓰기
+      allow read, write: if isDirector() || isStaff();
+
+      // 비인증 사용자: 토큰 검증(read) + 완료 처리(update)만 허용
+      allow read: if true;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['status', 'staffId'])
+        && request.resource.data.status == 'completed'
+        && resource.data.status == 'pending'
+        && resource.data.expiresAt > request.time;
+
+      allow create, delete: if isDirector() || isStaff();
+    }
+
+    // =========================================================================
     // [Director] Staff + 서브컬렉션
     // =========================================================================
     match /staff/{staffId} {
       allow read: if isLoggedIn();
       allow write: if isDirector();
+
+      // 온보딩: 비인증 사용자가 유효한 토큰으로 staff 문서 생성
+      allow create: if request.resource.data.status == 'onboarding';
 
       match /contracts/{contractId} {
         allow read: if isDirector() ||
@@ -553,6 +576,16 @@ service cloud.firestore {
       match /assignments/{id} {
         allow read: if isLoggedIn();
         allow write: if isDirector();
+      }
+
+      match /documents/{docId} {
+        allow read: if isDirector() ||
+          (isStaff() && staffId == request.auth.uid);
+        allow write: if isDirector();
+      }
+
+      match /performanceNotes/{noteId} {
+        allow read, write: if isDirector();
       }
     }
 

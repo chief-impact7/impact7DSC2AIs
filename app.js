@@ -405,6 +405,47 @@ async function loadContacts() {
         snapshot.forEach((docSnap) => {
             allContacts.push({ id: docSnap.id, ...docSnap.data() });
         });
+
+        // allStudents → contacts DB 동기화 (contacts에 없는 학생은 DB에 저장)
+        const contactIdSet = new Set(allContacts.map(c => c.id));
+        const toSync = [];
+        for (const s of allStudents) {
+            if (!contactIdSet.has(s.id)) {
+                const contactData = {
+                    name: s.name || '',
+                    school: s.school || '',
+                    grade: s.grade || '',
+                    student_phone: s.student_phone || '',
+                    parent_phone_1: s.parent_phone_1 || '',
+                    parent_phone_2: s.parent_phone_2 || '',
+                    guardian_name_1: s.guardian_name_1 || '',
+                    guardian_name_2: s.guardian_name_2 || '',
+                    level: s.level || '',
+                    updated_at: serverTimestamp(),
+                };
+                toSync.push({ id: s.id, data: contactData });
+                allContacts.push({ id: s.id, ...contactData });
+                contactIdSet.add(s.id);
+            }
+        }
+        if (toSync.length > 0) {
+            console.log(`[loadContacts] 새 학생 ${toSync.length}명 → contacts DB 동기화`);
+            (async () => {
+                try {
+                    for (let i = 0; i < toSync.length; i += 500) {
+                        const batch = writeBatch(db);
+                        toSync.slice(i, i + 500).forEach(item => {
+                            batch.set(doc(db, 'contacts', item.id), item.data);
+                        });
+                        await batch.commit();
+                    }
+                    console.log(`[loadContacts] contacts DB 동기화 완료 (${toSync.length}건)`);
+                } catch (e) {
+                    console.warn('[loadContacts] contacts DB 동기화 실패:', e);
+                }
+            })();
+        }
+        console.log(`[loadContacts] contacts=${snapshot.size}, 동기화 후 allContacts=${allContacts.length}`);
         allContacts.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
     } catch (error) {
         console.error('[FIRESTORE ERROR] Failed to load contacts:', error);
@@ -739,10 +780,10 @@ function applyFilterAndRender() {
                 allClassCodes(s).some(code => code.toLowerCase().includes(term));
         });
 
-        // contacts에서도 검색 (students에 없는 항목만)
-        const studentIdSet = new Set(allStudents.map(s => s.id));
+        // contacts에서 과거 학생 검색 (현재 필터 결과에 없는 학생만)
+        const filteredIdSet = new Set(filtered.map(s => s.id));
         contactResults = allContacts.filter(c => {
-            if (studentIdSet.has(c.id)) return false; // 이미 학생 목록에 있음
+            if (filteredIdSet.has(c.id)) return false;
             if (chosungMode) {
                 return matchChosung(c.name, term) || matchChosung(c.school, term);
             }
@@ -1022,13 +1063,15 @@ function renderStudentItem(s, container) {
 }
 
 function renderContactResults(contacts, container) {
+    const PAST_LIMIT = 50;
     // 구분 헤더
     const header = document.createElement('div');
     header.className = 'group-header';
-    header.innerHTML = `<span class="group-label">과거 연락처</span><span class="group-count">${contacts.length}명</span>`;
+    header.innerHTML = `<span class="group-label">과거 학생</span><span class="group-count">${contacts.length}명</span>`;
     container.appendChild(header);
 
-    contacts.forEach(c => {
+    const visible = contacts.length <= PAST_LIMIT ? contacts : contacts.slice(0, PAST_LIMIT);
+    const renderContact = (c) => {
         const div = document.createElement('div');
         div.className = 'list-item contact-item';
         div.dataset.contactId = c.id;
@@ -1060,8 +1103,22 @@ function renderContactResults(contacts, container) {
                 if (c.level && window.handleLevelChange) window.handleLevelChange(c.level);
             }, 50);
         });
-        container.appendChild(div);
-    });
+        return div;
+    };
+
+    visible.forEach(c => container.appendChild(renderContact(c)));
+
+    if (contacts.length > PAST_LIMIT) {
+        const moreBtn = document.createElement('div');
+        moreBtn.className = 'list-item';
+        moreBtn.style.cssText = 'justify-content:center;cursor:pointer;color:var(--primary)';
+        moreBtn.innerHTML = `<span>+ ${contacts.length - PAST_LIMIT}명 더보기</span>`;
+        moreBtn.addEventListener('click', () => {
+            moreBtn.remove();
+            contacts.slice(PAST_LIMIT).forEach(c => container.appendChild(renderContact(c)));
+        });
+        container.appendChild(moreBtn);
+    }
 }
 
 function renderGroupedList(students, container) {
