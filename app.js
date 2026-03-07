@@ -3053,11 +3053,29 @@ async function runUpsertFromRows(rows, sourceName) {
         }
     }
 
+    // 4.5) day 검증: KS 아닌데 1일만 등원인 학생 경고
+    const dayWarnings = [];
+    for (const [docId, s] of Object.entries(studentMap)) {
+        for (const e of s.enrollments) {
+            const ls = (e.level_symbol || '').toUpperCase();
+            if (ls !== 'KS' && Array.isArray(e.day) && e.day.length === 1) {
+                dayWarnings.push(`${s.name} (${enrollmentCode(e)}): ${e.day.join(',')}`);
+            }
+        }
+    }
+
     // 5) Show confirmation dialog
     let msg = `📁 ${sourceName}\n\n`;
     msg += `📥 신규 등록: ${results.inserted.length}명\n`;
     msg += `📝 정보 변경: ${results.updated.length}명\n`;
     msg += `⏭️ 변경 없음: ${results.skipped.length}명\n\n`;
+
+    if (dayWarnings.length > 0) {
+        msg += `⚠️ 등원요일 1일만 입력 (KS 제외): ${dayWarnings.length}명\n`;
+        for (const w of dayWarnings.slice(0, 10)) msg += `  ⚠ ${w}\n`;
+        if (dayWarnings.length > 10) msg += `  ... 외 ${dayWarnings.length - 10}명\n`;
+        msg += '\n';
+    }
 
     if (results.inserted.length > 0) {
         msg += `🆕 신규:\n`;
