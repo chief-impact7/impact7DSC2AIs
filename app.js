@@ -153,16 +153,21 @@ const getActiveEnrollments = (s) => {
         }
     }
 
-    // 내신이 활성 기간(start_date <= today <= end_date)이면 정규를 숨김
-    const hasActiveNaesin = active.some(e =>
+    // end_date가 지난 enrollment(내신/특강) 제외
+    const current = active.filter(e => {
+        if (!validDate(e.end_date)) return true;
+        return e.end_date >= today;
+    });
+
+    // 내신이 활성 기간이면 정규를 숨김 (내신 종료 후 정규 복귀)
+    const hasActiveNaesin = current.some(e =>
         e.class_type === '내신' &&
-        validDate(e.start_date) && e.start_date <= today &&
-        validDate(e.end_date) && e.end_date >= today
+        validDate(e.start_date) && e.start_date <= today
     );
     if (hasActiveNaesin) {
-        return active.filter(e => e.class_type !== '정규');
+        return current.filter(e => e.class_type !== '정규');
     }
-    return active;
+    return current;
 };
 
 // 활성 enrollment의 요일 합집합 (내신 기간 중에는 정규 제외됨)
