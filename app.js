@@ -114,14 +114,12 @@ const branchesFromStudent = (s) => {
     return [...set];
 };
 
-// 모든 enrollment의 요일 합집합
-const combinedDays = (s) => [...new Set((s.enrollments || []).flatMap(e => normalizeDays(e.day)))];
-
 /**
  * 활성 enrollment만 반환.
  * 같은 class_type 내에서 start_date <= 오늘인 것 중 가장 최근 것만 활성.
  * start_date > 오늘이면 "예정" (비활성).
  * 같은 class_type의 새 enrollment이 없으면 이전 것이 계속 활성.
+ * 내신이 활성 기간이면 정규를 숨김.
  */
 const getActiveEnrollments = (s) => {
     const enrollments = s.enrollments || [];
@@ -138,9 +136,10 @@ const getActiveEnrollments = (s) => {
     }
 
     const active = [];
+    const validDate = (d) => d && /^\d{4}-/.test(d);
+
     for (const [ct, list] of Object.entries(byType)) {
         // start_date <= 오늘인 것 중 가장 최근
-        const validDate = (d) => d && /^\d{4}-/.test(d);
         const started = list
             .filter(e => !validDate(e.start_date) || e.start_date <= today)
             .sort((a, b) => (b.start_date || '').localeCompare(a.start_date || ''));
@@ -153,8 +152,21 @@ const getActiveEnrollments = (s) => {
             active.push(sorted[0]);
         }
     }
+
+    // 내신이 활성 기간(start_date <= today <= end_date)이면 정규를 숨김
+    const hasActiveNaesin = active.some(e =>
+        e.class_type === '내신' &&
+        validDate(e.start_date) && e.start_date <= today &&
+        validDate(e.end_date) && e.end_date >= today
+    );
+    if (hasActiveNaesin) {
+        return active.filter(e => e.class_type !== '정규');
+    }
     return active;
 };
+
+// 활성 enrollment의 요일 합집합 (내신 기간 중에는 정규 제외됨)
+const combinedDays = (s) => [...new Set(getActiveEnrollments(s).flatMap(e => normalizeDays(e.day)))];
 
 // 현재 맥락에 맞는 enrollment 반환: 학기 필터 있으면 해당 학기, 없으면 활성
 const relevantEnrollments = (s) => activeFilters.semester
@@ -3053,12 +3065,12 @@ async function runUpsertFromRows(rows, sourceName) {
         }
     }
 
-    // 4.5) day 검증: KS 아닌데 1일만 등원인 학생 경고
+    // 4.5) day 검증: KS/내신 아닌데 1일만 등원인 학생 경고
     const dayWarnings = [];
     for (const [docId, s] of Object.entries(studentMap)) {
         for (const e of s.enrollments) {
             const ls = (e.level_symbol || '').toUpperCase();
-            if (ls !== 'KS' && Array.isArray(e.day) && e.day.length === 1) {
+            if (ls !== 'KS' && e.class_type !== '내신' && Array.isArray(e.day) && e.day.length === 1) {
                 dayWarnings.push(`${s.name} (${enrollmentCode(e)}): ${e.day.join(',')}`);
             }
         }
