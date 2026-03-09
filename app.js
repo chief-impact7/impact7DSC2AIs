@@ -707,11 +707,17 @@ function buildClassFilterSidebar() {
 }
 
 function buildGradeFilterSidebar() {
+    const semFilter = activeFilters.semester;
+    const levelFilter = activeFilters.level;
     buildDynamicFilterSidebar({
         listId: 'grade-filter-list',
         filterKey: 'grade',
         emptyMsg: '학년 정보가 없습니다',
-        preFilter: activeFilters.level ? s => s.level === activeFilters.level : null,
+        preFilter: s => {
+            if (levelFilter && s.level !== levelFilter) return false;
+            if (semFilter) return s.enrollments ? s.enrollments.some(e => e.semester === semFilter) : false;
+            return true;
+        },
         getItems: s => s.grade ? [String(s.grade)] : [],
         sortFn: (a, b) => Number(a) - Number(b),
         labelFn: grade => `${esc(grade)}학년`,
