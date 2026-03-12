@@ -237,6 +237,7 @@
                         <span class="material-symbols-outlined icon-btn" id="group-view-btn" title="그룹 뷰 (반별)" onclick="window.toggleGroupView()" role="button" tabindex="0" aria-label="그룹 뷰">view_agenda</span>
                         <span class="material-symbols-outlined icon-btn" title="새로고침"
                             onclick="window.refreshStudents && window.refreshStudents()" role="button" tabindex="0" aria-label="새로고침">refresh</span>
+                        <span class="material-symbols-outlined icon-btn" id="naesin-schedule-btn" title="내신 시간표 설정" onclick="window.openNaesinSchedule()" role="button" tabindex="0" aria-label="내신 시간표 설정">event_note</span>
                         <span class="material-symbols-outlined icon-btn" title="데이터 업로드" onclick="window.handleUpload()" role="button" tabindex="0" aria-label="데이터 업로드">upload</span>
                         <span class="material-symbols-outlined icon-btn" title="구글시트로 다운로드" onclick="window.handleSheetExport()" role="button" tabindex="0" aria-label="구글시트로 다운로드">download</span>
                     </div>
@@ -890,6 +891,31 @@
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="window.closeReturnFromLeaveModal()">취소</button>
                 <button class="btn-save" onclick="window.submitReturnFromLeave()">요청</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 내신 시간표 일괄 설정 모달 -->
+    <div id="naesin-modal" class="modal-overlay" style="display:none"
+         onclick="if(event.target===this)window.closeNaesinSchedule()"
+         role="dialog" aria-modal="true" aria-label="내신 시간표 설정">
+        <div class="modal-card naesin-modal-card">
+            <h3 class="modal-title">
+                <span class="material-symbols-outlined">event_note</span>
+                내신 시간표 일괄 설정
+            </h3>
+            <div class="naesin-period">
+                <div class="naesin-period-row">
+                    <label>시작일</label>
+                    <input type="date" id="naesin-start-date" class="field-input">
+                    <label>종료일</label>
+                    <input type="date" id="naesin-end-date" class="field-input">
+                </div>
+            </div>
+            <div id="naesin-groups" class="naesin-groups"></div>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="window.closeNaesinSchedule()">취소</button>
+                <button class="btn-save" id="naesin-save-btn" onclick="window.saveNaesinSchedule()">저장</button>
             </div>
         </div>
     </div>

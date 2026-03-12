@@ -2482,3 +2482,172 @@ summary.menu-l2 .material-symbols-outlined {
     }
 }
 
+/* ── 내신 시간표 일괄 설정 ─────────────────────────────────────────────── */
+.naesin-modal-card {
+    width: 720px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 64px);
+    overflow-y: auto;
+}
+
+.naesin-period-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.naesin-period-row label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-sec);
+    white-space: nowrap;
+}
+.naesin-period-row .field-input {
+    width: 150px;
+}
+
+.naesin-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 50vh;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.naesin-group {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: var(--surface);
+}
+.naesin-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+.naesin-group-header h4 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-main);
+}
+.naesin-group-header .count {
+    font-size: 12px;
+    color: var(--text-sec);
+    background: var(--bg);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+.naesin-group-body { display: flex; flex-direction: column; gap: 8px; }
+.naesin-group.collapsed .naesin-group-body { display: none; }
+
+.naesin-subgroup {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    flex-wrap: wrap;
+}
+.naesin-subgroup-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.naesin-day-checks {
+    display: flex;
+    gap: 2px;
+}
+.naesin-day-checks label {
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    user-select: none;
+    transition: all 0.15s;
+}
+.naesin-day-checks input { display: none; }
+.naesin-day-checks label:has(input:checked) {
+    background: var(--primary);
+    color: #fff;
+    border-color: var(--primary);
+}
+.naesin-time-input {
+    width: 70px;
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    text-align: center;
+}
+
+.naesin-students {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+}
+.naesin-chip {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text-main);
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.naesin-chip:hover { border-color: var(--primary); }
+.naesin-chip.override {
+    background: #fff3e0;
+    border-color: #ff9800;
+    color: #e65100;
+}
+
+.naesin-add-subgroup {
+    font-size: 12px;
+    color: var(--primary);
+    cursor: pointer;
+    padding: 4px 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.naesin-add-subgroup:hover { text-decoration: underline; }
+.naesin-remove-sub {
+    font-size: 16px;
+    color: var(--text-sec);
+    cursor: pointer;
+    line-height: 1;
+}
+.naesin-remove-sub:hover { color: #e53935; }
+
+.naesin-override-popup {
+    position: absolute;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1100;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 200px;
+}
+.naesin-override-popup label { font-size: 12px; font-weight: 600; }
+
+@media (max-width: 600px) {
+    .naesin-modal-card { width: 100%; max-height: 90vh; }
+    .naesin-subgroup { flex-direction: column; }
+}
+
