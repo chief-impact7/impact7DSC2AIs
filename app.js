@@ -4656,10 +4656,9 @@ function buildNaesinGroups() {
     const groupMap = {};
     for (const s of targets) {
         const school = s.school || '학교미입력';
-        const levelShort = s.level === '중등' ? '중' : '고';
         const grade = s.grade || '?';
         const key = `${school}_${s.level}_${grade}`;
-        const label = `${school.replace(/고등학교$/, '').replace(/중학교$/, '').replace(/초등학교$/, '').replace(/학교$/, '').trim()}${levelShort}${grade}`;
+        const label = abbreviateSchool(s) || `${school}_${s.level}_${grade}`;
         if (!groupMap[key]) groupMap[key] = { label, students: [] };
         groupMap[key].students.push(s);
     }
@@ -4696,14 +4695,15 @@ function renderNaesinGroups() {
         const totalStudents = g.subgroups.reduce((n, sg) => n + sg.studentIds.length, 0);
         const overrideCount = Object.keys(g.overrides).length;
 
-        return `<div class="naesin-group" data-key="${key}">
+        const ek = escAttr(key);
+        return `<div class="naesin-group" data-key="${ek}">
             <div class="naesin-group-header" onclick="this.parentElement.classList.toggle('collapsed')">
                 <h4>${esc(g.label)}</h4>
                 <span class="count">${totalStudents}명${overrideCount ? ` (예외 ${overrideCount})` : ''}</span>
             </div>
             <div class="naesin-group-body">
                 ${g.subgroups.map((sg, si) => renderNaesinSubgroup(key, sg, si, g)).join('')}
-                <span class="naesin-add-subgroup" onclick="window.addNaesinSubgroup('${key}')">
+                <span class="naesin-add-subgroup" onclick="window.addNaesinSubgroup('${ek}')">
                     <span class="material-symbols-outlined" style="font-size:14px;">add</span> 서브그룹 추가
                 </span>
             </div>
@@ -4712,10 +4712,11 @@ function renderNaesinGroups() {
 }
 
 function renderNaesinSubgroup(groupKey, sg, subIdx, group) {
+    const ek = escAttr(groupKey);
     const dayChecks = NAESIN_DAYS.map(d => {
         const checked = sg.days.includes(d) ? 'checked' : '';
         return `<label><input type="checkbox" value="${d}" ${checked}
-            onchange="window.updateNaesinSubDays('${groupKey}',${subIdx})"><span>${d}</span></label>`;
+            onchange="window.updateNaesinSubDays('${ek}',${subIdx})"><span>${d}</span></label>`;
     }).join('');
 
     const students = sg.studentIds.map(id => {
@@ -4724,21 +4725,21 @@ function renderNaesinSubgroup(groupKey, sg, subIdx, group) {
         const hasOverride = !!group.overrides[id];
         const cls = hasOverride ? 'naesin-chip override' : 'naesin-chip';
         const overrideInfo = hasOverride
-            ? ` title="${group.overrides[id].days.join('')} ${group.overrides[id].time}"`
+            ? ` title="${escAttr(group.overrides[id].days.join(''))} ${escAttr(group.overrides[id].time)}"`
             : '';
-        return `<span class="${cls}" data-id="${id}"${overrideInfo}
-            onclick="window.openNaesinOverride(event,'${groupKey}',${subIdx},'${id}')">${esc(s.name)}</span>`;
+        return `<span class="${cls}" data-id="${escAttr(id)}"${overrideInfo}
+            onclick="window.openNaesinOverride(event,'${ek}',${subIdx},'${escAttr(id)}')">${esc(s.name)}</span>`;
     }).join('');
 
     const removeBtn = subIdx > 0
-        ? `<span class="naesin-remove-sub material-symbols-outlined" onclick="window.removeNaesinSubgroup('${groupKey}',${subIdx})" title="삭제">close</span>`
+        ? `<span class="naesin-remove-sub material-symbols-outlined" onclick="window.removeNaesinSubgroup('${ek}',${subIdx})" title="삭제">close</span>`
         : '';
 
     return `<div class="naesin-subgroup" data-sub="${subIdx}">
         <div class="naesin-subgroup-controls">
             <div class="naesin-day-checks">${dayChecks}</div>
-            <input type="time" class="naesin-time-input" value="${sg.time}"
-                onchange="window.updateNaesinSubTime('${groupKey}',${subIdx},this.value)">
+            <input type="time" class="naesin-time-input" value="${escAttr(sg.time)}"
+                onchange="window.updateNaesinSubTime('${ek}',${subIdx},this.value)">
             ${removeBtn}
         </div>
         <div class="naesin-students">${students || '<span style="color:var(--text-sec);font-size:12px;">학생 없음</span>'}</div>
@@ -4796,10 +4797,12 @@ window.openNaesinOverride = (event, groupKey, subIdx, studentId) => {
     const popup = document.createElement('div');
     popup.className = 'naesin-override-popup';
 
+    const ek = escAttr(groupKey);
+    const eid = escAttr(studentId);
     const moveOptions = g.subgroups.map((sg, i) => {
         if (i === subIdx) return '';
         const label = sg.days.length > 0 ? `${sg.days.join('')} ${sg.time || ''}` : `서브그룹 ${i + 1}`;
-        return `<button class="btn-cancel" style="font-size:12px;padding:4px 8px;" onclick="window.moveNaesinStudent('${groupKey}',${subIdx},${i},'${studentId}')">→ ${esc(label)}</button>`;
+        return `<button class="btn-cancel" style="font-size:12px;padding:4px 8px;" onclick="window.moveNaesinStudent('${ek}',${subIdx},${i},'${eid}')">→ ${esc(label)}</button>`;
     }).filter(Boolean).join('');
 
     const ovDays = existingOverride ? existingOverride.days : g.subgroups[subIdx].days;
@@ -4811,10 +4814,10 @@ window.openNaesinOverride = (event, groupKey, subIdx, studentId) => {
     popup.innerHTML = `
         <label>${esc(s.name)} — 개별 설정</label>
         <div style="display:flex;gap:4px;flex-wrap:wrap;">${dayChecks}</div>
-        <input type="time" class="naesin-time-input" value="${ovTime}" style="width:100px;">
+        <input type="time" class="naesin-time-input" value="${escAttr(ovTime)}" style="width:100px;">
         <div style="display:flex;gap:4px;flex-wrap:wrap;">
-            <button class="btn-save" style="font-size:12px;padding:4px 10px;" onclick="window.applyNaesinOverride('${groupKey}','${studentId}',this)">적용</button>
-            ${existingOverride ? `<button class="btn-cancel" style="font-size:12px;padding:4px 10px;" onclick="window.clearNaesinOverride('${groupKey}','${studentId}')">예외 해제</button>` : ''}
+            <button class="btn-save" style="font-size:12px;padding:4px 10px;" onclick="window.applyNaesinOverride('${ek}','${eid}',this)">적용</button>
+            ${existingOverride ? `<button class="btn-cancel" style="font-size:12px;padding:4px 10px;" onclick="window.clearNaesinOverride('${ek}','${eid}')">예외 해제</button>` : ''}
         </div>
         ${g.subgroups.length > 1 ? `<hr style="margin:4px 0;border:none;border-top:1px solid var(--border);"><label>서브그룹 이동</label>${moveOptions}` : ''}
     `;
@@ -4823,8 +4826,12 @@ window.openNaesinOverride = (event, groupKey, subIdx, studentId) => {
     const rect = chip.getBoundingClientRect();
     popup.style.position = 'fixed';
     popup.style.left = Math.min(rect.left, window.innerWidth - 240) + 'px';
-    popup.style.top = (rect.bottom + 4) + 'px';
     document.body.appendChild(popup);
+    // 하단 오버플로 방지: 팝업이 화면 밖으로 나가면 칩 위에 표시
+    const popupH = popup.offsetHeight;
+    popup.style.top = (rect.bottom + 4 + popupH > window.innerHeight)
+        ? Math.max(4, rect.top - popupH - 4) + 'px'
+        : (rect.bottom + 4) + 'px';
 
     const closeHandler = (e) => {
         if (!popup.contains(e.target) && e.target !== chip) {
@@ -4832,6 +4839,14 @@ window.openNaesinOverride = (event, groupKey, subIdx, studentId) => {
             document.removeEventListener('mousedown', closeHandler);
         }
     };
+    // popup이 외부에서 제거될 때도 리스너 정리
+    const observer = new MutationObserver(() => {
+        if (!document.body.contains(popup)) {
+            document.removeEventListener('mousedown', closeHandler);
+            observer.disconnect();
+        }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
     setTimeout(() => document.addEventListener('mousedown', closeHandler), 0);
 };
 
@@ -4869,6 +4884,7 @@ window.saveNaesinSchedule = async () => {
     if (!startDate || !endDate) { alert('내신 기간을 설정해주세요.'); return; }
     if (endDate <= startDate) { alert('종료일은 시작일 이후여야 합니다.'); return; }
 
+    const studentMap = new Map(allStudents.map(s => [s.id, s]));
     const writes = [];
     const warnings = [];
 
@@ -4880,8 +4896,7 @@ window.saveNaesinSchedule = async () => {
                 const time = override ? override.time : sg.time;
 
                 if (days.length === 0) {
-                    const s = allStudents.find(st => st.id === id);
-                    warnings.push(s?.name || id);
+                    warnings.push(studentMap.get(id)?.name || id);
                     continue;
                 }
                 writes.push({ studentId: id, days, time });
@@ -4898,7 +4913,7 @@ window.saveNaesinSchedule = async () => {
 
     const conflicts = [];
     for (const w of writes) {
-        const s = allStudents.find(st => st.id === w.studentId);
+        const s = studentMap.get(w.studentId);
         if (!s) continue;
         const hasNaesin = (s.enrollments || []).some(e =>
             e.class_type === '내신' &&
@@ -4925,7 +4940,7 @@ window.saveNaesinSchedule = async () => {
             const batch = writeBatch(db);
 
             for (const w of chunk) {
-                const s = allStudents.find(st => st.id === w.studentId);
+                const s = studentMap.get(w.studentId);
                 if (!s) continue;
 
                 const newEnrollment = {
