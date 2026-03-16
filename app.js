@@ -79,6 +79,8 @@ let currentSemester = null;  // 오늘 기준 현재 학기
 let currentFilteredStudents = null; // 필터 적용 후 학생 목록 (내보내기용)
 let allContacts = []; // contacts 컬렉션 캐시
 let leaveRequests = []; // leave_requests 컬렉션 캐시
+let _statsGeneratedDate = null; // daily stats 중복 생성 방지 (날짜 기반)
+let _memoSubcollectionCache = {}; // studentId → memo[] (서브컬렉션 읽기 결과 캐시)
 
 // HTML 이스케이프 — 사용자 입력을 innerHTML에 삽입할 때 XSS 방지
 const esc = (str) => {
@@ -349,7 +351,7 @@ onAuthStateChanged(auth, async (user) => {
         if (!activeFilters.semester && currentSemester) {
             activeFilters.semester = currentSemester;
         }
-        loadStudentList();
+        loadStudentList().then(() => generateDailyStatsIfNeeded());
         loadContacts();
     } else {
         currentUser = null;
@@ -408,7 +410,6 @@ async function loadStudentList() {
         updateLeaveCountBadges();
         loadMemoCacheAndRender();
         loadLeaveRequests();
-        generateDailyStatsIfNeeded();
     } catch (error) {
         console.error('[FIRESTORE ERROR] Failed to load students:', error);
         listContainer.innerHTML = '<p style="padding:16px;color:red">Failed to load students.</p>';
@@ -416,6 +417,56 @@ async function loadStudentList() {
 }
 
 window.refreshStudents = loadStudentList;
+
+// ---------------------------------------------------------------------------
+// 로컬 캐시 업데이트 후 UI 갱신 (전체 재조회 없이)
+// ---------------------------------------------------------------------------
+const _deleteFieldSentinel = deleteField(); // FieldValue sentinel for comparison
+
+function _isDeleteSentinel(v) {
+    // Firebase FieldValue.delete() sentinel 확인
+    return v != null && typeof v === 'object' && (
+        v.constructor === _deleteFieldSentinel.constructor ||
+        (typeof v._methodName === 'string' && v._methodName === 'deleteField')
+    );
+}
+
+function _upsertLocalStudent(docId, data) {
+    const idx = allStudents.findIndex(s => s.id === docId);
+    if (idx >= 0) {
+        // merge: deleteField sentinel은 제거, 나머지는 덮어쓰기
+        const merged = { ...allStudents[idx] };
+        for (const [k, v] of Object.entries(data)) {
+            if (_isDeleteSentinel(v)) {
+                delete merged[k];
+            } else {
+                merged[k] = v;
+            }
+        }
+        merged.enrollments = normalizeEnrollments(merged);
+        allStudents[idx] = merged;
+    } else {
+        // 신규 삽입 시 sentinel 제거
+        const cleaned = {};
+        for (const [k, v] of Object.entries(data)) {
+            if (!_isDeleteSentinel(v)) cleaned[k] = v;
+        }
+        const newStudent = { id: docId, ...cleaned };
+        newStudent.enrollments = normalizeEnrollments(newStudent);
+        allStudents.push(newStudent);
+        allStudents.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+    }
+}
+
+function _refreshUIAfterMutation() {
+    buildSiblingMap();
+    buildClassFilterSidebar();
+    buildGradeFilterSidebar();
+    buildSemesterFilter();
+    updateReadonlyBanner();
+    updateLeaveCountBadges();
+    loadMemoCacheAndRender(); // 내부에서 applyFilterAndRender() 호출
+}
 
 // ---------------------------------------------------------------------------
 // contacts 컬렉션 로딩
@@ -479,7 +530,7 @@ async function loadContacts() {
 // ---------------------------------------------------------------------------
 async function loadLeaveRequests() {
     try {
-        const snapshot = await getDocs(collection(db, 'leave_requests'));
+        const snapshot = await getDocs(query(collection(db, 'leave_requests'), where('status', '==', 'requested')));
         leaveRequests = [];
         snapshot.forEach((docSnap) => {
             leaveRequests.push({ docId: docSnap.id, ...docSnap.data() });
@@ -498,10 +549,11 @@ const getTodayDateStr = () => toDateStrKST(new Date());
 
 async function generateDailyStatsIfNeeded() {
     const dateStr = getTodayDateStr();
+    if (_statsGeneratedDate === dateStr) return;
     const statsRef = doc(db, 'daily_stats', dateStr);
     try {
         const existing = await getDoc(statsRef);
-        if (existing.exists()) return; // 이미 생성됨
+        if (existing.exists()) { _statsGeneratedDate = dateStr; return; } // 이미 생성됨
 
         // 통계 집계
         const byStatus = {};
@@ -554,6 +606,7 @@ async function generateDailyStatsIfNeeded() {
             by_status_branch: byStatusBranch,
             by_level_symbol_branch: byLevelSymbolBranch
         });
+        _statsGeneratedDate = dateStr;
         // snapshot generated
     } catch (e) {
         console.warn('[DAILY STATS] Failed to generate:', e);
@@ -1851,6 +1904,7 @@ window.submitNewStudent = async () => {
                 // Student exists — add new enrollments to existing doc
                 const newEnrollments = studentData.enrollments || [];
                 const mergedEnrollments = [...(existingStudent.enrollments || []), ...newEnrollments];
+                studentData.enrollments = mergedEnrollments;
                 await setDoc(doc(db, 'students', docId), { ...studentData, enrollments: mergedEnrollments }, { merge: true });
                 await addDoc(collection(db, 'history_logs'), {
                     doc_id: docId,
@@ -1901,9 +1955,10 @@ window.submitNewStudent = async () => {
         _pendingEnrollments = [];
         hideForm();
 
-        // 저장 성공 후 UI 갱신 — 여기서의 에러는 저장과 무관하므로 별도 처리
+        // 저장 성공 후 UI 갱신 — 로컬 캐시 업데이트 (전체 재조회 없이)
         try {
-            await loadStudentList();
+            _upsertLocalStudent(currentStudentId, studentData);
+            _refreshUIAfterMutation();
             const savedStudent = allStudents.find(s => s.id === currentStudentId);
             if (savedStudent) {
                 const targetEl = document.querySelector(`.list-item[data-id="${CSS.escape(currentStudentId)}"]`);
@@ -2414,7 +2469,8 @@ window.saveEnrollment = async () => {
         });
 
         modal.style.display = 'none';
-        await loadStudentList();
+        _upsertLocalStudent(currentStudentId, { enrollments: updatedEnrollments, branch });
+        _refreshUIAfterMutation();
         const savedStudent = allStudents.find(s => s.id === currentStudentId);
         if (savedStudent) {
             const targetEl = document.querySelector(`.list-item[data-id="${CSS.escape(currentStudentId)}"]`);
@@ -2530,7 +2586,8 @@ window.confirmEndClassSingle = async () => {
         modal.style.display = 'none';
         _endClassTarget = null;
 
-        await loadStudentList();
+        _upsertLocalStudent(studentId, updateData);
+        _refreshUIAfterMutation();
         if (currentStudentId) {
             const savedStudent = allStudents.find(s => s.id === currentStudentId);
             if (savedStudent) {
@@ -2595,7 +2652,16 @@ window.confirmEndClass = async () => {
         modal.style.display = 'none';
         _endClassTarget = null;
 
-        await loadStudentList();
+        // 로컬 캐시 업데이트: affected 학생들 일괄 반영
+        affected.forEach(s => {
+            const remaining = (s.enrollments || []).filter(en => !(enrollmentCode(en) === code && en.class_type === classType));
+            const isWithdraw = remaining.length === 0;
+            const branch = remaining.length ? branchFromClassNumber(remaining[0].class_number) : (s.branch || '');
+            const updateData = { enrollments: remaining, branch };
+            if (isWithdraw) updateData.status = '퇴원';
+            _upsertLocalStudent(s.id, updateData);
+        });
+        _refreshUIAfterMutation();
         // 현재 선택된 학생 다시 표시
         if (currentStudentId) {
             const savedStudent = allStudents.find(s => s.id === currentStudentId);
@@ -3259,7 +3325,22 @@ async function runUpsertFromRows(rows, sourceName) {
     }
 
     alert(`✅ 완료!\n\n신규: ${results.inserted.length}명\n변경: ${results.updated.length}명\n건너뜀: ${results.skipped.length}명`);
-    await loadStudentList();
+
+    // 로컬 캐시 업데이트 (전체 재조회 없이)
+    for (const w of writes) {
+        if (w.type === 'set') {
+            // 전체 교체: 기존 항목 제거 후 새로 삽입
+            const existIdx = allStudents.findIndex(s => s.id === w.docId);
+            const newStudent = { id: w.docId, ...w.data };
+            newStudent.enrollments = normalizeEnrollments(newStudent);
+            if (existIdx >= 0) allStudents[existIdx] = newStudent;
+            else allStudents.push(newStudent);
+        } else {
+            _upsertLocalStudent(w.docId, w.data);
+        }
+    }
+    allStudents.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
+    _refreshUIAfterMutation();
 }
 
 // 메모 모달 상태 — ESC 핸들러보다 먼저 선언
@@ -3290,16 +3371,27 @@ document.addEventListener('keydown', (e) => {
 // ---------------------------------------------------------------------------
 // 메모 관리 (Firestore 서브컬렉션: students/{docId}/memos/{memoId})
 // ---------------------------------------------------------------------------
+
+// 메모 서브컬렉션 공유 fetch — loadMemos, loadFormMemos에서 동일 학생 중복 읽기 방지
+async function _fetchMemoSubcollection(studentId, forceRefresh = false) {
+    if (!forceRefresh && _memoSubcollectionCache[studentId]) {
+        return _memoSubcollectionCache[studentId];
+    }
+    const snap = await getDocs(collection(db, 'students', studentId, 'memos'));
+    const memos = [];
+    snap.forEach(d => memos.push({ id: d.id, ...d.data() }));
+    memos.sort((a, b) => (a.created_at?.seconds || 0) - (b.created_at?.seconds || 0));
+    _memoSubcollectionCache[studentId] = memos;
+    return memos;
+}
+
 async function loadMemos(studentId) {
     const container = document.getElementById('memo-list');
     if (!container) return;
     container.innerHTML = '<p style="color:var(--text-sec);font-size:0.85em;padding:4px 0;">로딩 중...</p>';
 
     try {
-        const snap = await getDocs(collection(db, 'students', studentId, 'memos'));
-        const memos = [];
-        snap.forEach(d => memos.push({ id: d.id, ...d.data() }));
-        memos.sort((a, b) => (a.created_at?.seconds || 0) - (b.created_at?.seconds || 0));
+        const memos = await _fetchMemoSubcollection(studentId);
         renderMemos(memos, studentId);
     } catch (e) {
         container.innerHTML = '<p style="color:red;font-size:0.85em;">메모 로드 실패</p>';
@@ -3357,16 +3449,24 @@ window.deleteMemo = async (studentId, memoId) => {
     if (!confirm('이 메모를 삭제하시겠습니까?')) return;
     try {
         await deleteDoc(doc(db, 'students', studentId, 'memos', memoId));
-        // 메모 캐시 업데이트: 남은 메모가 있는지 확인
-        const remaining = await getDocs(collection(db, 'students', studentId, 'memos'));
-        if (remaining.empty) {
+        // 캐시에서 삭제된 메모 제거
+        if (_memoSubcollectionCache[studentId]) {
+            _memoSubcollectionCache[studentId] = _memoSubcollectionCache[studentId].filter(m => m.id !== memoId);
+        }
+        // DOM에서 삭제된 메모 카드 제거 (재조회 없이)
+        const card = document.querySelector(`.memo-card[data-memo-id="${CSS.escape(memoId)}"]`);
+        if (card) card.remove();
+        // 남은 메모 카드가 없으면 has_memo 해제
+        const container = document.getElementById('memo-list');
+        const remainingCards = container?.querySelectorAll('.memo-card');
+        if (!remainingCards || remainingCards.length === 0) {
             delete memoCache[studentId];
             await setDoc(doc(db, 'students', studentId), { has_memo: false }, { merge: true });
             const st = allStudents.find(s => s.id === studentId);
             if (st) st.has_memo = false;
+            if (container) container.innerHTML = '<p style="color:var(--text-sec);font-size:0.85em;padding:4px 0;">메모가 없습니다. + 버튼으로 추가하세요.</p>';
         }
         updateListItemIcons(studentId);
-        await loadMemos(studentId);
     } catch (e) {
         alert('삭제 실패: ' + e.message);
     }
@@ -3412,6 +3512,7 @@ window.saveMemoFromModal = async () => {
         const st = allStudents.find(s => s.id === currentStudentId);
         if (st) st.has_memo = true;
         updateListItemIcons(currentStudentId);
+        delete _memoSubcollectionCache[currentStudentId]; // 캐시 무효화 (새 메모 반영)
         document.getElementById('memo-modal').style.display = 'none';
         _memoModalContext = null;
         if (ctx === 'form') await loadFormMemos(currentStudentId);
@@ -3435,10 +3536,7 @@ async function loadFormMemos(studentId) {
     container.innerHTML = '<p style="color:var(--text-sec);font-size:0.85em;">로딩 중...</p>';
 
     try {
-        const snap = await getDocs(collection(db, 'students', studentId, 'memos'));
-        const memos = [];
-        snap.forEach(d => memos.push({ id: d.id, ...d.data() }));
-        memos.sort((a, b) => (a.created_at?.seconds || 0) - (b.created_at?.seconds || 0));
+        const memos = await _fetchMemoSubcollection(studentId);
 
         container.innerHTML = '';
         if (memos.length === 0) {
@@ -3479,14 +3577,26 @@ window.deleteFormMemo = async (studentId, memoId) => {
     if (!confirm('이 메모를 삭제하시겠습니까?')) return;
     try {
         await deleteDoc(doc(db, 'students', studentId, 'memos', memoId));
-        // 남은 메모 없으면 has_memo 해제
-        const remaining = await getDocs(collection(db, 'students', studentId, 'memos'));
-        if (remaining.empty) {
-            delete memoCache[studentId];
-            await setDoc(doc(db, 'students', studentId), { has_memo: false }, { merge: true });
-            const st = allStudents.find(s => s.id === studentId);
-            if (st) st.has_memo = false;
-            updateListItemIcons(studentId);
+        // 캐시에서 삭제된 메모 제거
+        if (_memoSubcollectionCache[studentId]) {
+            _memoSubcollectionCache[studentId] = _memoSubcollectionCache[studentId].filter(m => m.id !== memoId);
+            if (_memoSubcollectionCache[studentId].length === 0) {
+                delete memoCache[studentId];
+                await setDoc(doc(db, 'students', studentId), { has_memo: false }, { merge: true });
+                const st = allStudents.find(s => s.id === studentId);
+                if (st) st.has_memo = false;
+                updateListItemIcons(studentId);
+            }
+        } else {
+            // Cache miss — fetch fresh to check if this was the last memo
+            const freshMemos = await _fetchMemoSubcollection(studentId, true);
+            if (freshMemos.length === 0) {
+                delete memoCache[studentId];
+                await setDoc(doc(db, 'students', studentId), { has_memo: false }, { merge: true });
+                const st = allStudents.find(s => s.id === studentId);
+                if (st) st.has_memo = false;
+                updateListItemIcons(studentId);
+            }
         }
         await loadFormMemos(studentId);
     } catch (e) {
@@ -4453,7 +4563,7 @@ function _openReturnModal(studentId, type) {
 
     let periodText = '';
     if (student.status === '퇴원') {
-        const wdLr = leaveRequests.find(lr => lr.student_id === studentId && lr.status === 'approved' && _isWithdrawalType(lr.request_type));
+        const wdLr = leaveRequests.find(lr => lr.student_id === studentId && _isWithdrawalType(lr.request_type));
         if (wdLr?.withdrawal_date) periodText = `퇴원일: ${wdLr.withdrawal_date}`;
     } else if (student.pause_start_date) {
         periodText = `휴원기간: ${student.pause_start_date} ~ ${student.pause_end_date || ''}`;
@@ -4525,8 +4635,8 @@ window.approveLeaveRequest = async (docId, studentId) => {
     if (!confirm(`${r.student_name} — ${typeLabel}\n승인하시겠습니까?`)) return;
 
     try {
-        const studentSnap = await getDoc(doc(db, 'students', studentId));
-        const beforeData = studentSnap.exists() ? studentSnap.data() : {};
+        const cachedStudent = allStudents.find(s => s.id === studentId);
+        const beforeData = cachedStudent || {};
         const beforeStatus = beforeData.status || '';
 
         const studentUpdate = {};
