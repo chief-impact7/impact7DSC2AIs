@@ -1,5 +1,5 @@
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, getDocs, getDoc, doc, setDoc, addDoc, deleteDoc, updateDoc, deleteField, serverTimestamp, query, where, orderBy, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, setDoc, addDoc, deleteDoc, updateDoc, deleteField, serverTimestamp, query, where, orderBy, limit, writeBatch } from 'firebase/firestore';
 import { auth, db } from './firebase-config.js';
 import { signInWithGoogle, logout, getGoogleAccessToken } from './auth.js';
 
@@ -1793,10 +1793,43 @@ window.submitNewStudent = async () => {
             const newDays = [...new Set((studentData.enrollments || []).flatMap(e => normalizeDays(e.day)))];
             const afterStr = `상태:${studentData.status}, 반:${newCodes}, 요일:${displayDays(newDays)}`;
 
+            // 휴원/퇴원 → 재원 변경 시 DSC와 동일한 cleanup 수행
+            const LEAVE_STATUSES = new Set(['실휴원', '가휴원', '퇴원']);
+            const isReturnToActive = LEAVE_STATUSES.has(oldStudent.status) && studentData.status === '재원';
+
+            if (isReturnToActive) {
+                studentData.pause_start_date = deleteField();
+                studentData.pause_end_date = deleteField();
+            }
+
             await setDoc(doc(db, 'students', docId), studentData, { merge: true });
+
+            // leave_requests 중 미처리 요청 승인 처리
+            if (isReturnToActive) {
+                try {
+                    const leaveQ = query(
+                        collection(db, 'leave_requests'),
+                        where('student_id', '==', docId),
+                        where('status', '==', 'requested')
+                    );
+                    const leaveSnap = await getDocs(leaveQ);
+                    const approvePromises = leaveSnap.docs.map(d =>
+                        updateDoc(d.ref, {
+                            status: 'approved',
+                            approved_by: currentUser?.email || 'system',
+                            approved_at: serverTimestamp(),
+                            updated_at: serverTimestamp()
+                        })
+                    );
+                    await Promise.all(approvePromises);
+                } catch (leaveErr) {
+                    console.warn('[LEAVE_REQUEST CLEANUP]', leaveErr);
+                }
+            }
+
             await addDoc(collection(db, 'history_logs'), {
                 doc_id: docId,
-                change_type: 'UPDATE',
+                change_type: isReturnToActive ? 'RETURN' : 'UPDATE',
                 before: beforeStr,
                 after: afterStr,
                 google_login_id: currentUser?.email || 'system',
@@ -3487,7 +3520,8 @@ async function loadHistory(studentId) {
         const q = query(
             collection(db, 'history_logs'),
             where('doc_id', '==', studentId),
-            orderBy('timestamp', 'desc')
+            orderBy('timestamp', 'desc'),
+            limit(200)
         );
         const snap = await getDocs(q);
         const logs = [];
