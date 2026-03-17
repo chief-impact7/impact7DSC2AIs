@@ -478,7 +478,7 @@ async function searchContacts(term) {
                 limit(20)
             ));
             phoneSnap.forEach(d => {
-                if (!currentIds.has(d.id) && !seenIds.has(d.id)) {
+                if (!activeIds.has(d.id) && !seenIds.has(d.id)) {
                     results.push({ id: d.id, ...d.data() });
                     seenIds.add(d.id);
                 }
@@ -490,15 +490,6 @@ async function searchContacts(term) {
     return results;
 }
 
-// 학생 1건 → contacts 동기화 (저장 시에만 호출)
-function _syncOneContact(studentId, data) {
-    setDoc(doc(db, 'contacts', studentId), {
-        name: data.name || '', school: data.school || '', grade: data.grade || '',
-        student_phone: data.student_phone || '', parent_phone_1: data.parent_phone_1 || '',
-        parent_phone_2: data.parent_phone_2 || '', guardian_name_1: data.guardian_name_1 || '',
-        guardian_name_2: data.guardian_name_2 || '', level: data.level || '',
-    }, { merge: true }).catch(() => {});
-}
 
 // ---------------------------------------------------------------------------
 // leave_requests 컬렉션 로딩
@@ -1799,6 +1790,9 @@ window.submitNewStudent = async () => {
             studentData.pause_start_date = f.pause_start_date.value;
             studentData.pause_end_date = f.pause_end_date.value;
         }
+        if (f.status.value === '퇴원') {
+            studentData.withdrawal_date = getTodayDateStr();
+        }
     }
 
     const saveBtn = document.getElementById('save-btn');
@@ -1836,7 +1830,7 @@ window.submitNewStudent = async () => {
                               const leaveQ = query(
                                   collection(db, 'leave_requests'),
                                   where('student_id', '==', docId),
-                                  where('status', '==', 'requested')
+                                  where('status', 'in', ['requested', 'teacher_approved'])
                               );
                               const leaveSnap = await getDocs(leaveQ);
                               await Promise.all(leaveSnap.docs.map(d =>
@@ -4561,8 +4555,7 @@ function _openReturnModal(studentId, type) {
 
     let periodText = '';
     if (student.status === '퇴원') {
-        const wdLr = leaveRequests.find(lr => lr.student_id === studentId && _isWithdrawalType(lr.request_type));
-        if (wdLr?.withdrawal_date) periodText = `퇴원일: ${wdLr.withdrawal_date}`;
+        if (student.withdrawal_date) periodText = `퇴원일: ${student.withdrawal_date}`;
     } else if (student.pause_start_date) {
         periodText = `휴원기간: ${student.pause_start_date} ~ ${student.pause_end_date || ''}`;
     }
@@ -4629,6 +4622,7 @@ window.submitReturnFromLeave = async () => {
 window.teacherApproveLeaveRequest = async (docId, studentId) => {
     const r = leaveRequests.find(lr => lr.docId === docId);
     if (!r) return;
+    if (r.status !== 'requested') { alert('이미 처리된 요청입니다.'); return; }
     const typeLabel = `${r.request_type}${r.leave_sub_type ? ' (' + r.leave_sub_type + ')' : ''}`;
     if (!confirm(`${r.student_name} — ${typeLabel}\n교수부 승인하시겠습니까?`)) return;
 
@@ -4657,6 +4651,7 @@ window.teacherApproveLeaveRequest = async (docId, studentId) => {
 window.approveLeaveRequest = async (docId, studentId) => {
     const r = leaveRequests.find(lr => lr.docId === docId);
     if (!r) return;
+    if (r.status !== 'teacher_approved') { alert('교수부 승인이 먼저 필요합니다.'); return; }
 
     const typeLabel = `${r.request_type}${r.leave_sub_type ? ' (' + r.leave_sub_type + ')' : ''}`;
     if (!confirm(`${r.student_name} — ${typeLabel}\n행정부 최종 승인하시겠습니까?`)) return;
