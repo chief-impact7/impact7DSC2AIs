@@ -330,10 +330,7 @@ onAuthStateChanged(auth, async (user) => {
         if (!activeFilters.semester && currentSemester) {
             activeFilters.semester = currentSemester;
         }
-        loadStudentList().then(() => {
-            generateDailyStatsIfNeeded();
-            _syncStudentsToContacts(); // 신규 학생 → contacts 동기화 (읽기 0, 쓰기만)
-        });
+        loadStudentList().then(() => generateDailyStatsIfNeeded());
     } else {
         currentUser = null;
         currentUserRole = null;
@@ -493,24 +490,14 @@ async function searchContacts(term) {
     return results;
 }
 
-// 신규/변경 학생 → contacts 동기화 (읽기 0, 쓰기만)
-async function _syncStudentsToContacts() {
-    try {
-        for (let i = 0; i < allStudents.length; i += 500) {
-            const batch = writeBatch(db);
-            allStudents.slice(i, i + 500).forEach(s => {
-                batch.set(doc(db, 'contacts', s.id), {
-                    name: s.name || '', school: s.school || '', grade: s.grade || '',
-                    student_phone: s.student_phone || '', parent_phone_1: s.parent_phone_1 || '',
-                    parent_phone_2: s.parent_phone_2 || '', guardian_name_1: s.guardian_name_1 || '',
-                    guardian_name_2: s.guardian_name_2 || '', level: s.level || '',
-                }, { merge: true });
-            });
-            await batch.commit();
-        }
-    } catch (e) {
-        console.warn('[syncContacts] 동기화 실패:', e);
-    }
+// 학생 1건 → contacts 동기화 (저장 시에만 호출)
+function _syncOneContact(studentId, data) {
+    setDoc(doc(db, 'contacts', studentId), {
+        name: data.name || '', school: data.school || '', grade: data.grade || '',
+        student_phone: data.student_phone || '', parent_phone_1: data.parent_phone_1 || '',
+        parent_phone_2: data.parent_phone_2 || '', guardian_name_1: data.guardian_name_1 || '',
+        guardian_name_2: data.guardian_name_2 || '', level: data.level || '',
+    }, { merge: true }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -1926,11 +1913,6 @@ window.submitNewStudent = async () => {
                 updated_at: serverTimestamp(),
             };
             await setDoc(doc(db, 'contacts', contactDocId), contactData, { merge: true });
-            // 로컬 캐시 갱신
-            const idx = allContacts.findIndex(c => c.id === contactDocId);
-            const merged = { id: contactDocId, ...contactData };
-            if (idx >= 0) Object.assign(allContacts[idx], merged);
-            else allContacts.push(merged);
         } catch (contactErr) {
             console.warn('[CONTACTS SYNC]', contactErr);
         }
