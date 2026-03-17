@@ -77,7 +77,8 @@ let memoCache = {};     // studentId → true/false (메모 존재 여부)
 let semesterSettings = {};   // semester → { start_date }
 let currentSemester = null;  // 오늘 기준 현재 학기
 let currentFilteredStudents = null; // 필터 적용 후 학생 목록 (내보내기용)
-let allContacts = []; // contacts 컬렉션 캐시
+// allContacts 제거 — on-demand Firestore 쿼리로 대체 (20k reads → 1~50 reads)
+let _contactSearchId = 0; // contacts 검색 stale 방지
 let leaveRequests = []; // leave_requests 컬렉션 캐시
 let _statsGeneratedDate = null; // daily stats 중복 생성 방지 (날짜 기반)
 let _memoSubcollectionCache = {}; // studentId → memo[] (서브컬렉션 읽기 결과 캐시)
@@ -351,8 +352,10 @@ onAuthStateChanged(auth, async (user) => {
         if (!activeFilters.semester && currentSemester) {
             activeFilters.semester = currentSemester;
         }
-        loadStudentList().then(() => generateDailyStatsIfNeeded());
-        loadContacts();
+        loadStudentList().then(() => {
+            generateDailyStatsIfNeeded();
+            _syncStudentsToContacts(); // 신규 학생 → contacts 동기화 (읽기 0, 쓰기만)
+        });
     } else {
         currentUser = null;
         currentUserRole = null;
@@ -469,12 +472,66 @@ function _refreshUIAfterMutation() {
 }
 
 // ---------------------------------------------------------------------------
-// contacts 컬렉션 로딩
+// contacts on-demand 검색 (Firestore prefix 쿼리, 1~50 reads)
 // ---------------------------------------------------------------------------
-async function loadContacts() {
-    // [최적화 수정]: contacts 전체(약 2만 건)를 메모리에 로딩하면 매 새로고침마다 엄청난 읽기 비용이 발생합니다.
-    // 검색과 자동채움을 위해 Firebase 전체 스캔을 하던 기존 방식을 해제합니다.
-    allContacts = [];
+async function searchContacts(term) {
+    if (!term || term.length < 2) return [];
+    const currentIds = new Set(allStudents.map(s => s.id));
+    const results = [];
+    const seenIds = new Set();
+    try {
+        // 이름 prefix 검색
+        const nameSnap = await getDocs(query(
+            collection(db, 'contacts'),
+            where('name', '>=', term),
+            where('name', '<=', term + '\uf8ff'),
+            limit(50)
+        ));
+        nameSnap.forEach(d => {
+            if (!currentIds.has(d.id) && !seenIds.has(d.id)) {
+                results.push({ id: d.id, ...d.data() });
+                seenIds.add(d.id);
+            }
+        });
+        // 전화번호 prefix 검색 (3자리 이상 숫자)
+        if (/\d{3,}/.test(term)) {
+            const phoneSnap = await getDocs(query(
+                collection(db, 'contacts'),
+                where('student_phone', '>=', term),
+                where('student_phone', '<=', term + '\uf8ff'),
+                limit(20)
+            ));
+            phoneSnap.forEach(d => {
+                if (!currentIds.has(d.id) && !seenIds.has(d.id)) {
+                    results.push({ id: d.id, ...d.data() });
+                    seenIds.add(d.id);
+                }
+            });
+        }
+    } catch (e) {
+        console.warn('[searchContacts] 검색 실패:', e);
+    }
+    return results;
+}
+
+// 신규/변경 학생 → contacts 동기화 (읽기 0, 쓰기만)
+async function _syncStudentsToContacts() {
+    try {
+        for (let i = 0; i < allStudents.length; i += 500) {
+            const batch = writeBatch(db);
+            allStudents.slice(i, i + 500).forEach(s => {
+                batch.set(doc(db, 'contacts', s.id), {
+                    name: s.name || '', school: s.school || '', grade: s.grade || '',
+                    student_phone: s.student_phone || '', parent_phone_1: s.parent_phone_1 || '',
+                    parent_phone_2: s.parent_phone_2 || '', guardian_name_1: s.guardian_name_1 || '',
+                    guardian_name_2: s.guardian_name_2 || '', level: s.level || '',
+                }, { merge: true });
+            });
+            await batch.commit();
+        }
+    } catch (e) {
+        console.warn('[syncContacts] 동기화 실패:', e);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -821,33 +878,37 @@ function applyFilterAndRender() {
         }
     }
 
-    const term = document.getElementById('studentSearchInput')?.value.trim().toLowerCase() || '';
-    let contactResults = [];
+    const rawTerm = document.getElementById('studentSearchInput')?.value.trim() || '';
+    const term = rawTerm.toLowerCase();
     if (term) {
         const chosungMode = isChosungOnly(term);
         filtered = filtered.filter(s => {
             if (chosungMode) {
-                // 초성 검색: 이름, 학교에서 초성 매칭
-                return matchChosung(s.name, term) ||
-                    matchChosung(s.school, term);
+                return matchChosung(s.name, term) || matchChosung(s.school, term);
             }
-            // 일반 검색
             return (s.name && s.name.toLowerCase().includes(term)) ||
                 (s.school && s.school.toLowerCase().includes(term)) ||
                 (s.student_phone && s.student_phone.includes(term)) ||
                 (s.parent_phone_1 && s.parent_phone_1.includes(term)) ||
                 allClassCodes(s).some(code => code.toLowerCase().includes(term));
         });
-
-        // contacts에서 과거 학생 검색 (최적화: 2만 건 읽기 방지를 위해 클라이언트 필터 비활성화)
-        // const filteredIdSet = new Set(filtered.map(s => s.id));
-        // 연락처 서버 검색이 필요하다면 별도의 UI와 API를 통해 검색해야 합니다.
-        contactResults = [];
     }
 
     currentFilteredStudents = filtered;
     updateFilterChips();
-    renderStudentList(filtered, contactResults);
+    renderStudentList(filtered, []);
+
+    // 과거 학생 비동기 검색 (Firestore prefix 쿼리, 초성 제외)
+    if (rawTerm.length >= 2 && !isChosungOnly(term)) {
+        const searchId = ++_contactSearchId;
+        searchContacts(rawTerm).then(results => {
+            if (searchId !== _contactSearchId) return;
+            if (results.length > 0) {
+                const container = document.querySelector('.list-items');
+                renderContactResults(results, container);
+            }
+        });
+    }
 }
 
 // 활성 필터 요약을 카운트 칩 옆에 표시
@@ -1366,19 +1427,17 @@ _searchClearBtn?.addEventListener('keydown', (e) => {
         if (isEditMode) return;
         const name = _nameInput?.value.trim();
         const phone = _phoneInput?.value.trim();
-        // 전화번호가 어느정도 입력되었을 때만 처리하도록 최적화 (Firestore 읽기 절약)
-        if (!name || !phone || phone.length < 4) return;
+        if (!name || !phone) return;
 
         const docId = makeDocId(name, phone);
         if (docId === _lastFilledDocId) return;
 
         try {
-            const snap = await getDoc(doc(db, 'contacts', docId));
-            if (!snap.exists()) return;
-            const contact = snap.data();
-            
+            const contactSnap = await getDoc(doc(db, 'contacts', docId));
+            if (!contactSnap.exists()) return;
+            const contact = contactSnap.data();
+
             _lastFilledDocId = docId;
-            // contact 정보로 빈 필드 채움
             if (contact.level) _form.level.value = contact.level;
             if (contact.school && !_form.school.value) _form.school.value = contact.school;
             if (contact.grade && !_form.grade.value) _form.grade.value = contact.grade;
@@ -1386,15 +1445,14 @@ _searchClearBtn?.addEventListener('keydown', (e) => {
             if (contact.parent_phone_2 && !_form.parent_phone_2.value) _form.parent_phone_2.value = contact.parent_phone_2;
             if (contact.level && window.handleLevelChange) window.handleLevelChange(contact.level);
 
-            // 자동채움 알림 (잠깐 표시)
             const hint = document.getElementById('contact-autofill-hint');
             if (hint) {
-                hint.textContent = `연락처에서 "${contact.name || name}" 정보를 불러왔습니다`;
+                hint.textContent = `연락처에서 "${contact.name}" 정보를 불러왔습니다`;
                 hint.style.display = 'block';
                 setTimeout(() => { hint.style.display = 'none'; }, 3000);
             }
         } catch (e) {
-            console.error('Contact autofill fetch error:', e);
+            // getDoc 실패 시 무시 (네트워크 오류 등)
         }
     }
 
