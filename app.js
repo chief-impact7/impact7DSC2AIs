@@ -2293,19 +2293,21 @@ function renderStayStats(studentData) {
     const startDates = enrollments.map(e => e.start_date).filter(d => d && d !== '?' && /^\d{4}-/.test(d)).sort();
     let periodHtml = '—';
     if (startDates.length) {
-        const start = new Date(startDates[0]);
-        const now = new Date();
-        const totalMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
-        const years = Math.floor(totalMonths / 12);
-        const months = totalMonths % 12;
-        const isPast = start <= now;
+        const isPast = startDates[0] <= getTodayDateStr();
+        const [sy, sm] = startDates[0].split('-').map(Number);
+        const nowKST = new Date(getTodayDateStr() + 'T00:00:00+09:00');
+        const totalMonths = (nowKST.getFullYear() - sy) * 12 + (nowKST.getMonth() + 1 - sm);
         const duration = !isPast
             ? '등원예정'
             : totalMonths < 1
                 ? '등원'
-                : years > 0
-                    ? `${years}년${months > 0 ? ' ' + months + '개월' : ''}`
-                    : `${totalMonths}개월`;
+                : (() => {
+                    const years = Math.floor(totalMonths / 12);
+                    const months = totalMonths % 12;
+                    return years > 0
+                        ? `${years}년${months > 0 ? ' ' + months + '개월' : ''}`
+                        : `${totalMonths}개월`;
+                })();
         periodHtml = `${formatDate(startDates[0])} 부터 &nbsp;·&nbsp; <strong>${duration}</strong>`;
     }
 

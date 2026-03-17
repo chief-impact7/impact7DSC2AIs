@@ -443,7 +443,7 @@ service cloud.firestore {
         && hasOnlyAllowedAbsenceFields()
         && request.resource.data.status is string
         && request.resource.data.status in ['open', 'closed']
-        && withinFieldLimit(25);
+        && withinFieldLimit(30);
 
       allow delete: if isAuthorized();
     }
