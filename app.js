@@ -1683,8 +1683,9 @@ window.submitNewStudent = async () => {
         // baseName과 숫자 변형 중 재원/휴원인 학생 한 번에 수집
         const activeVariants = allStudents.filter(s => variantRe.test(s.name) && isActive(s));
 
-        if (activeVariants.length > 0) {
-            // 입력한 이름 자체가 이미 활성 학생이거나, baseName이 활성이면 차단
+        // 입력한 정확한 이름이 재원/휴원에 있으면 차단 (김나연2를 입력했는데 재원에 김나연만 있으면 허용)
+        const exactMatch = activeVariants.find(s => s.name === name);
+        if (exactMatch) {
             const usedNumbers = activeVariants
                 .map(s => { const m = s.name.match(/(\d+)$/); return m ? parseInt(m[1], 10) : 1; });
             const nextNum = Math.max(...usedNumbers) + 1;
