@@ -472,57 +472,9 @@ function _refreshUIAfterMutation() {
 // contacts 컬렉션 로딩
 // ---------------------------------------------------------------------------
 async function loadContacts() {
-    try {
-        const snapshot = await getDocs(collection(db, 'contacts'));
-        allContacts = [];
-        snapshot.forEach((docSnap) => {
-            allContacts.push({ id: docSnap.id, ...docSnap.data() });
-        });
-
-        // allStudents → contacts DB 동기화 (contacts에 없는 학생은 DB에 저장)
-        const contactIdSet = new Set(allContacts.map(c => c.id));
-        const toSync = [];
-        for (const s of allStudents) {
-            if (!contactIdSet.has(s.id)) {
-                const contactData = {
-                    name: s.name || '',
-                    school: s.school || '',
-                    grade: s.grade || '',
-                    student_phone: s.student_phone || '',
-                    parent_phone_1: s.parent_phone_1 || '',
-                    parent_phone_2: s.parent_phone_2 || '',
-                    guardian_name_1: s.guardian_name_1 || '',
-                    guardian_name_2: s.guardian_name_2 || '',
-                    level: s.level || '',
-                    updated_at: serverTimestamp(),
-                };
-                toSync.push({ id: s.id, data: contactData });
-                allContacts.push({ id: s.id, ...contactData });
-                contactIdSet.add(s.id);
-            }
-        }
-        if (toSync.length > 0) {
-            console.log(`[loadContacts] 새 학생 ${toSync.length}명 → contacts DB 동기화`);
-            (async () => {
-                try {
-                    for (let i = 0; i < toSync.length; i += 500) {
-                        const batch = writeBatch(db);
-                        toSync.slice(i, i + 500).forEach(item => {
-                            batch.set(doc(db, 'contacts', item.id), item.data);
-                        });
-                        await batch.commit();
-                    }
-                    console.log(`[loadContacts] contacts DB 동기화 완료 (${toSync.length}건)`);
-                } catch (e) {
-                    console.warn('[loadContacts] contacts DB 동기화 실패:', e);
-                }
-            })();
-        }
-        console.log(`[loadContacts] contacts=${snapshot.size}, 동기화 후 allContacts=${allContacts.length}`);
-        allContacts.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ko'));
-    } catch (error) {
-        console.error('[FIRESTORE ERROR] Failed to load contacts:', error);
-    }
+    // [최적화 수정]: contacts 전체(약 2만 건)를 메모리에 로딩하면 매 새로고침마다 엄청난 읽기 비용이 발생합니다.
+    // 검색과 자동채움을 위해 Firebase 전체 스캔을 하던 기존 방식을 해제합니다.
+    allContacts = [];
 }
 
 // ---------------------------------------------------------------------------
@@ -887,18 +839,10 @@ function applyFilterAndRender() {
                 allClassCodes(s).some(code => code.toLowerCase().includes(term));
         });
 
-        // contacts에서 과거 학생 검색 (현재 필터 결과에 없는 학생만)
-        const filteredIdSet = new Set(filtered.map(s => s.id));
-        contactResults = allContacts.filter(c => {
-            if (filteredIdSet.has(c.id)) return false;
-            if (chosungMode) {
-                return matchChosung(c.name, term) || matchChosung(c.school, term);
-            }
-            return (c.name && c.name.toLowerCase().includes(term)) ||
-                (c.school && c.school.toLowerCase().includes(term)) ||
-                (c.student_phone && c.student_phone.includes(term)) ||
-                (c.parent_phone_1 && c.parent_phone_1.includes(term));
-        });
+        // contacts에서 과거 학생 검색 (최적화: 2만 건 읽기 방지를 위해 클라이언트 필터 비활성화)
+        // const filteredIdSet = new Set(filtered.map(s => s.id));
+        // 연락처 서버 검색이 필요하다면 별도의 UI와 API를 통해 검색해야 합니다.
+        contactResults = [];
     }
 
     currentFilteredStudents = filtered;
@@ -1418,33 +1362,39 @@ _searchClearBtn?.addEventListener('keydown', (e) => {
     const _phoneInput = _form?.querySelector('[name="parent_phone_1"]');
     let _lastFilledDocId = null; // 중복 채움 방지
 
-    function _tryContactAutofill() {
+    async function _tryContactAutofill() {
         if (isEditMode) return;
         const name = _nameInput?.value.trim();
         const phone = _phoneInput?.value.trim();
-        if (!name || !phone) return;
+        // 전화번호가 어느정도 입력되었을 때만 처리하도록 최적화 (Firestore 읽기 절약)
+        if (!name || !phone || phone.length < 4) return;
 
         const docId = makeDocId(name, phone);
         if (docId === _lastFilledDocId) return;
 
-        const contact = allContacts.find(c => c.id === docId);
-        if (!contact) return;
+        try {
+            const snap = await getDoc(doc(db, 'contacts', docId));
+            if (!snap.exists()) return;
+            const contact = snap.data();
+            
+            _lastFilledDocId = docId;
+            // contact 정보로 빈 필드 채움
+            if (contact.level) _form.level.value = contact.level;
+            if (contact.school && !_form.school.value) _form.school.value = contact.school;
+            if (contact.grade && !_form.grade.value) _form.grade.value = contact.grade;
+            if (contact.student_phone && !_form.student_phone.value) _form.student_phone.value = contact.student_phone;
+            if (contact.parent_phone_2 && !_form.parent_phone_2.value) _form.parent_phone_2.value = contact.parent_phone_2;
+            if (contact.level && window.handleLevelChange) window.handleLevelChange(contact.level);
 
-        _lastFilledDocId = docId;
-        // contact 정보로 빈 필드 채움
-        if (contact.level) _form.level.value = contact.level;
-        if (contact.school && !_form.school.value) _form.school.value = contact.school;
-        if (contact.grade && !_form.grade.value) _form.grade.value = contact.grade;
-        if (contact.student_phone && !_form.student_phone.value) _form.student_phone.value = contact.student_phone;
-        if (contact.parent_phone_2 && !_form.parent_phone_2.value) _form.parent_phone_2.value = contact.parent_phone_2;
-        if (contact.level && window.handleLevelChange) window.handleLevelChange(contact.level);
-
-        // 자동채움 알림 (잠깐 표시)
-        const hint = document.getElementById('contact-autofill-hint');
-        if (hint) {
-            hint.textContent = `연락처에서 "${contact.name}" 정보를 불러왔습니다`;
-            hint.style.display = 'block';
-            setTimeout(() => { hint.style.display = 'none'; }, 3000);
+            // 자동채움 알림 (잠깐 표시)
+            const hint = document.getElementById('contact-autofill-hint');
+            if (hint) {
+                hint.textContent = `연락처에서 "${contact.name || name}" 정보를 불러왔습니다`;
+                hint.style.display = 'block';
+                setTimeout(() => { hint.style.display = 'none'; }, 3000);
+            }
+        } catch (e) {
+            console.error('Contact autofill fetch error:', e);
         }
     }
 
