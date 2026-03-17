@@ -4456,13 +4456,13 @@ function _renderLeaveRequestRow(r, studentId) {
                     onclick="event.stopPropagation(); window.cancelLeaveRequest('${escAttr(r.docId)}', '${escAttr(studentId)}')">
                     요청 취소
                 </button>
-                <button class="${tDone ? 'btn-save' : 'btn-cancel'}" style="font-size:11px;padding:4px 10px;${tDone ? 'opacity:0.8;' : ''}"
+                <button class="${tDone ? 'btn-save' : 'btn-cancel'}" style="font-size:11px;padding:4px 10px;${tDone ? '' : 'opacity:0.6;'}"
                     ${tDone ? 'disabled' : `onclick="event.stopPropagation(); window.teacherApproveLeaveRequest('${escAttr(r.docId)}', '${escAttr(studentId)}')"`}>
-                    ${tDone ? '교수부 ✓' : '교수부 승인'}
+                    ${tDone ? '교수부 ✓' : '교수부'}
                 </button>
-                <button class="${aDone ? 'btn-save' : 'btn-cancel'}" style="font-size:11px;padding:4px 10px;${aDone ? 'opacity:0.8;' : ''}"
+                <button class="${aDone ? 'btn-save' : 'btn-cancel'}" style="font-size:11px;padding:4px 10px;${aDone ? '' : 'opacity:0.6;'}"
                     ${aDone ? 'disabled' : `onclick="event.stopPropagation(); window.approveLeaveRequest('${escAttr(r.docId)}', '${escAttr(studentId)}')"`}>
-                    ${aDone ? '행정부 ✓' : '행정부 승인'}
+                    ${aDone ? '행정부 ✓' : '행정부'}
                 </button>
             </div>`;
     }
