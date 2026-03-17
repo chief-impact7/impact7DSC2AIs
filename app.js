@@ -476,7 +476,7 @@ function _refreshUIAfterMutation() {
 // ---------------------------------------------------------------------------
 async function searchContacts(term) {
     if (!term || term.length < 2) return [];
-    const currentIds = new Set(allStudents.map(s => s.id));
+    const activeIds = new Set(allStudents.filter(s => s.status !== '퇴원').map(s => s.id));
     const results = [];
     const seenIds = new Set();
     try {
@@ -488,7 +488,8 @@ async function searchContacts(term) {
             limit(50)
         ));
         nameSnap.forEach(d => {
-            if (!currentIds.has(d.id) && !seenIds.has(d.id)) {
+            if (activeIds.has(d.id)) return;
+            if (!seenIds.has(d.id)) {
                 results.push({ id: d.id, ...d.data() });
                 seenIds.add(d.id);
             }
