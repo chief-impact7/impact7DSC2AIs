@@ -2298,11 +2298,14 @@ function renderStayStats(studentData) {
         const totalMonths = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
         const years = Math.floor(totalMonths / 12);
         const months = totalMonths % 12;
-        const duration = totalMonths <= 0
+        const isPast = start <= now;
+        const duration = !isPast
             ? '등원예정'
-            : years > 0
-                ? `${years}년${months > 0 ? ' ' + months + '개월' : ''}`
-                : `${totalMonths}개월`;
+            : totalMonths < 1
+                ? '등원'
+                : years > 0
+                    ? `${years}년${months > 0 ? ' ' + months + '개월' : ''}`
+                    : `${totalMonths}개월`;
         periodHtml = `${formatDate(startDates[0])} 부터 &nbsp;·&nbsp; <strong>${duration}</strong>`;
     }
 
@@ -4514,7 +4517,7 @@ function renderLeaveRequestCard(studentId) {
     const leaveRecords = records.filter(r => !_isWithdrawalType(r.request_type) && !_isReturnType(r.request_type));
     const withdrawRecords = records.filter(r => _isWithdrawalType(r.request_type) || _isReturnType(r.request_type));
 
-    const btnStyle = 'font-size:11px;padding:2px 8px;margin-left:auto;display:inline-flex;align-items:center;gap:4px;';
+    const btnStyle = 'font-size:11px;padding:4px 12px;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;';
     let cards = '';
 
     // 휴원요청서 카드

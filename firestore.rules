@@ -431,6 +431,7 @@ service cloud.firestore {
           'reason', 'reason_valid', 'resolution', 'settlement_memo',
           'makeup_date', 'makeup_time',
           'makeup_status', 'makeup_completed_by', 'makeup_completed_at',
+          'marked_absent_by', 'marked_absent_at',
           'reschedule_history',
           'status', 'created_by', 'created_at', 'updated_by', 'updated_at'
         ]);

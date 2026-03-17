@@ -112,6 +112,7 @@ body {
     height: 48px;
     width: 100%;
     max-width: 480px;
+    margin-left: 80px;
     margin-right: auto;
 }
 
